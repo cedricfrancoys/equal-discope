@@ -1,0 +1,16 @@
+{
+    "production":       true,
+    "parent_domain":    "discope.yb.run",
+    "backend_url":      "https://discope.yb.run",
+    "rest_api_url":     "https://discope.yb.run/",
+    "user_entity":      "lodging\\identity\\User",
+    "lang":             "fr",
+    "locale":           "fr",
+    "company_name":     "Kaleo ASBL",
+    "company_url":      "https://www.kaleo-asbl.be/",
+    "app_name":         "Discope",
+    "app_logo_url":     "/assets/img/brand/logo.svg",
+    "version":          "1.0 (2022)",
+    "license":          "AGPL v3.0",
+    "license_url":      "https://www.gnu.org/licenses/agpl-3.0.en.html"
+}
