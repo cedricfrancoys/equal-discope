@@ -159,13 +159,14 @@ class Tester {
             }
 
             $this->results[$id]['status'] = $success?'ok':'ko';
+            $result_txt = $result;
             if(gettype($result) == 'object') {
-                $result = get_class($result);
+                $result_txt = get_class($result);
                 if(is_a($result, Model::getType())) {
-                    $result .= ' object:'.json_encode($result->toArray());
+                    $result_txt .= ' object:'.json_encode($result->toArray());
                 }
             }
-            $this->results[$id]['result'] = $result;
+            $this->results[$id]['result'] = $result_txt;
 
             if(isset($test['expected'])) {
                 $this->results[$id]['expected'] = $test['expected'];
