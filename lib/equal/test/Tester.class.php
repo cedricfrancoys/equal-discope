@@ -159,6 +159,7 @@ class Tester {
             }
 
             $this->results[$id]['status'] = $success?'ok':'ko';
+
             $result_txt = $result;
             if(gettype($result) == 'object') {
                 $result_txt = get_class($result);
