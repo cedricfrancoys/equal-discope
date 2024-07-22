@@ -6,6 +6,9 @@
 */
 namespace equal\db;
 
+/**
+ * This class is used as abstract class providing members and methods signature for DBManipulator class that extend it.
+ */
 class DBManipulator {
 
     /**
@@ -136,6 +139,7 @@ class DBManipulator {
      * @access   public
      */
     public function connect($auto_select=true) {
+        return $this;
     }
 
     public function select($db_name) {
@@ -157,7 +161,8 @@ class DBManipulator {
     /**
      * Returns the SQL type to use for a given ORM type.
      * This method is meant to be overloaded in children DBManipulator classes.
-    */
+     * @deprecated - use DataAdapterProviderSql::get(<usage>)
+     */
     public function getSqlType($type) {
         return '';
     }
@@ -168,15 +173,12 @@ class DBManipulator {
     * @return boolean    false if no connection can be made, true otherwise
     *
     */
-    public final function canConnect() {
+    public function canConnect() {
         if($fp = fsockopen($this->host, $this->port, $errno, $errstr, 1)) {
             fclose($fp);
             return true;
         }
         return false;
-    }
-
-    public function createDatabase($db_name) {
     }
 
     /**
@@ -206,6 +208,14 @@ class DBManipulator {
         return $this->last_query;
     }
 
+    public static function fetchRow($result) {
+        return [];
+    }
+
+    public static function fetchArray($result) {
+        return [];
+    }
+
     protected function setLastId($id) {
         $this->last_id = $id;
     }
@@ -218,4 +228,154 @@ class DBManipulator {
         $this->last_query = $query;
     }
 
+    /**
+     * Get records from specified table, according to some conditions.
+     *
+     * @param	array   $tables       name of involved tables
+     * @param	array   $fields       list of requested fields
+     * @param	array   $ids          ids to which the selection is limited
+     * @param	array   $conditions   list of arrays (field, operand, value)
+     * @param	string  $id_field     name of the id field ('id' by default)
+     * @param	mixed   $order        string holding name of the order field or maps holding field names as keys and sorting as value
+     * @param	integer $start
+     * @param	integer $limit
+     *
+     * @return	resource              reference to query resource
+     */
+    public function getRecords($tables, $fields=NULL, $ids=NULL, $conditions=NULL, $id_field='id', $order=[], $start=0, $limit=0) {}
+
+    public function setRecords($table, $ids, $fields, $conditions=null, $id_field='id') {}
+
+    /**
+     * Inserts new records in specified table.
+     *
+     * @param	string      $table name of the table in which insert the records.
+     * @param	array       $fields list of involved fields.
+     * @param	array       $values array of arrays specifying the values related to each specified field.
+     * @return	resource    Reference to query resource.
+     */
+    public function addRecords($table, $fields, $values) {}
+
+    public function deleteRecords($table, $ids, $conditions=null, $id_field='id') {}
+
+    /**
+     * Fetch and increment the column of a series of records in a single operation.
+     * This method implements FAA instruction (fetch-and-add) in order to read and update a column as an atomic operation.
+     *
+     * @param int $increment    A numeric value used to increment columns (if value positive) or decrement columns (if value is negative).
+     */
+    public function incRecords($table, $ids, $field, $increment, $id_field='id') {}
+
+
+    /*
+        SQL request generation helpers
+    */
+
+
+    /**
+     * Creates a new database.
+     *
+     * Generates a SQL query and create a new database according to given $db_name.
+     *
+     * @param string $db_name   The name of the database to create.
+     * @return string SQL query to create a database.
+     */
+    public function createDatabase($db_name) {}
+
+    /**
+     * Generates a SQL query to retrieve a list of all tables from the current database.
+     *
+     * @return string SQL query to retrieve all tables.
+     */
+    public function getTables() {}
+
+    /**
+     * Generates a SQL query to get the schema of the specified table.
+     *
+     * @param string $table_name    The name of the table whose schema is to be retrieved.
+     * @return string SQL query to get the table schema.
+     */
+    public function getTableSchema($table_name) {}
+
+    /**
+     * Generates a SQL query to get the columns of the specified table.
+     *
+     * @param string $table_name    The name of the table whose columns are to be retrieved.
+     * @return string SQL query to get the table columns.
+     */
+    public function getTableColumns($table_name) {}
+
+    /**
+     * Generates a SQL query to get the constraints of the specified table.
+     *
+     * @param string $table_name    The name of the table whose constraints are to be retrieved.
+     * @return string SQL query to get the table constraints.
+     */
+    public function getTableUniqueConstraints($table_name) {}
+
+    /**
+     * Generates the SQL query to create a specific table.
+     * The query holds a condition to run only if the table does not exist yet.
+     *
+     * @param string $table_name    The name of the table for which the creation SQL is generated.
+     * @return string SQL query to create the specified table.
+     */
+    public function getQueryCreateTable($table_name) {}
+
+    /**
+     * Generates one or more SQL queries related to a column creation, according to a given column definition.
+     *
+     * $def structure:
+     * [
+     *      'type'             => int(11),
+     *      'null'             => false,
+     *      'default'          => 0,
+     *      'auto_increment'   => false,
+     *       'primary'         => false,
+     *      'index'            => false
+     * ]
+     * @param string $table_name    The name of the table to modify.
+     * @param string $column_name   The name of the column to add.
+     * @param array $def            Array describing the column properties such as type, nullability, default value, etc.
+     * @return string SQL query to add a column.
+    */
+    public function getQueryAddColumn($table_name, $column_name, $def) {}
+
+    /**
+     * Generates a SQL query to add an index to a table.
+     *
+     * @param string $table_name    The name of the table.
+     * @param string $column        The name of the column to index.
+     * @return string SQL query to add an index.
+     */
+    public function getQueryAddIndex($table_name, $column) {}
+
+    /**
+     * Generates a SQL query to add a unique constraint to one or more columns in a table.
+     *
+     * @param string $table_name        The name of the table.
+     * @param array|string $columns     The name(s) of the column(s) to include in the unique constraint.
+     * @return string SQL query to add a unique constraint.
+     */
+    public function getQueryAddUniqueConstraint($table_name, $columns) {}
+
+    /**
+     * Generates a SQL query to add records to a table.
+     *
+     * @param string $table     The name of the table where records will be added.
+     * @param array $fields     Array of field names corresponding to the columns in the table.
+     * @param array $values     Array of values to be inserted; each sub-array corresponds to a row.
+     * @return string SQL query to add records.
+     */
+    public function getQueryAddRecords($table, $fields, $values) {}
+
+    /**
+     * Generates a SQL query to set columns according to an associative array, for all records of a table.
+     *
+     * @param string $table     Name of the table where records will be added.
+     * @param array $fields     Associative array mapping field names (columns) to values those must be updated to.
+     * @param array $values     Array of values to be inserted; each sub-array corresponds to a row.
+     * @return string SQL query to add records.
+     */
+    public function getQuerySetRecords($table, $fields) {}
 }

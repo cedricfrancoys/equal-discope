@@ -23,6 +23,8 @@ $group = Group::create(['name' => 'test group'])->first(true);
 
 */
 
+use equal\orm\Field;
+
 list($params, $providers) = announce([
     'description'   => "Create a new object using given fields values.",
     'params'        => [
@@ -54,34 +56,37 @@ list($params, $providers) = announce([
     'providers'     => ['context', 'orm', 'adapt']
 ]);
 
-list($context, $orm, $adapter) = [$providers['context'], $providers['orm'], $providers['adapt']];
+/**
+ * @var \equal\php\Context               $context
+ * @var \equal\orm\ObjectManager         $orm
+ * @var \equal\data\DataAdapterProvider  $dap
+ */
+list($context, $orm, $dap) = [$providers['context'], $providers['orm'], $providers['adapt']];
+
+/** @var \equal\data\adapt\DataAdapter */
+$adapter = $dap->get('json');
 
 // fields and values have been received as a raw array : adapt received values according to schema
-$entity = $orm->getModel($params['entity']);
-if(!$entity) {
+$model = $orm->getModel($params['entity']);
+if(!$model) {
     throw new Exception("unknown_entity", QN_ERROR_INVALID_PARAM);
 }
 
-$schema = $entity->getSchema();
+$schema = $model->getSchema();
 
 try {
     foreach($params['fields'] as $field => $value) {
+        if(!isset($schema[$field])) {
+            continue;
+        }
         // drop empty and unknown fields
         if(is_null($value) || !isset($schema[$field])) {
             unset($params['fields'][$field]);
             continue;
         }
-        /*
-        $f = $orm->getField($params['entity'], $field);
-        if(!$f) {
-            throw new Exception("missing_field", QN_ERROR_UNKNOWN);
-        }
-        // raises an Exception if value is not convertible or breaks the usage
-        $params['fields'][$field] = $f->set($value, 'json')
-                                      ->validate()
-                                      ->get();
-        */
-        $params['fields'][$field] = $adapter->adapt($value, $schema[$field]['type']);
+        /** @var equal\orm\Field */
+        $f = $model->getField($field);
+        $params['fields'][$field] = $adapter->adaptIn($value, $f->getUsage());
     }
 }
 catch(Exception $e) {
@@ -97,8 +102,8 @@ catch(Exception $e) {
 
 // fields for which no value has been given are set to default value (set in Model)
 $instance = $params['entity']::create($params['fields'], $params['lang'])
-            ->adapt('txt')
-            ->first(true);
+    ->adapt('json')
+    ->first(true);
 
 $result = [
     'entity' => $params['entity'],

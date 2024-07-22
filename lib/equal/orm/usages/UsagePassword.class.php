@@ -1,4 +1,4 @@
-    <?php
+<?php
 /*
     This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
     Some Rights Reserved, Cedric Francoys, 2010-2021
@@ -9,16 +9,20 @@ namespace equal\orm\usages;
 
 class UsagePassword extends Usage {
 
-    public function getType(): string {
-        return 'password';
-    }
-
-    public function getSqlType(): string {
-            return 'varchar(255)';
+    public function __construct(string $usage_str) {
+        parent::__construct($usage_str);
+        // force allowing enough bytes for `password_hash()` result (depends on `PASSWORD_DEFAULT`)
+        $this->length = 255;
+        if($this->min == 0) {
+            $this->min = 8;
+        }
+        if($this->max > 70) {
+            $this->max = 70;
+        }
     }
 
     public function getConstraints(): array {
-        switch($this->getSubtype()) {
+        switch($this->getSubtype(0)) {
             case 'enisa':
             case 'nist':
                 return [
@@ -36,16 +40,11 @@ class UsagePassword extends Usage {
                     'invalid_password' => [
                         'message'   => 'Password too short.',
                         'function'  =>  function($value) {
-                            $min_len = ($this->getLength() > 0)?$this->getLength():8;
-                            return strlen($value) >= $min_len;
+                            return (strlen($value) >= $this->getMin());
                         }
                     ]
                 ];
         }
-    }
-
-    public function export($value, $lang='en'): string {
-        return $value;
     }
 
 }

@@ -1,35 +1,36 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
-    Some Rights Reserved, Cedric Francoys, 2010-2021
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
+    Some Rights Reserved, Cedric Francoys, 2010-2024
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
-    'description'   => 'Returns the list of public packages in current installation',
+list($params, $providers) = eQual::announce([
+    'description'   => 'Provide the full list of packages present within the `packages` folder (initialized or not).',
     'response'      => [
         'content-type'      => 'application/json',
         'charset'           => 'utf-8',
         'accept-origin'     => '*'
     ],
-    'providers'     => ['context'] 
+    'providers'     => ['context']
 ]);
 
-
+/**
+ * @var \equal\php\Context  $context
+ */
 list($context) = [$providers['context']];
 
+$packages = [];
 
-$data = array();
-$packages_dir = 'packages';
-if(!is_dir($packages_dir) || !($list = scandir($packages_dir))) {
-    throw new Exception('packages directory not found', QN_ERROR_INVALID_CONFIG);
+if(!is_dir('packages') || !($list = scandir('packages'))) {
+    throw new Exception('missing_packages_directory', QN_ERROR_INVALID_CONFIG);
 }
-    
+
 foreach($list as $node) {
-    if(is_dir($packages_dir.'/'.$node) && !in_array($node, array('.', '..')) && $node[0] != '.') {
-        $data[] = $node;
+    if(is_dir('packages/'.$node) && !in_array($node, array('.', '..')) && $node[0] != '.') {
+        $packages[] = $node;
     }
-}    
-    
+}
+
 $context->httpResponse()
-        ->body($data)
+        ->body($packages)
         ->send();

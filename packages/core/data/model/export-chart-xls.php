@@ -113,7 +113,7 @@ $first = reset($values);
 $fields = array_keys($first);
 $view_fields = array_map(function($a) { return ['value' => $a]; }, $fields);
 
-// generate a virtaul schema
+// generate a virtual schema
 // fields descriptors
 $descriptors = array_merge( [['type' => 'string']], array_fill(0, count($fields)-1, ['type' => 'float']));
 $schema = array_combine($fields, $descriptors);
@@ -221,7 +221,7 @@ foreach($values as $oid => $odata) {
         // handle html content
         if($type == 'string' && strlen($value) && $usage == 'text/html') {
             $align = 'left';
-            $$value = strip_tags(str_replace(['</p>', '<br />'], "\r\n", $value));
+            $value = strip_tags(str_replace(['</p>', '<br />'], "\r\n", $value));
         }
         else {
             // translate 'select' values

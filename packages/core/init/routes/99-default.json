@@ -65,14 +65,26 @@
     },
     "/envinfo": {
         "GET": {
-            "description": "Retrieve current Settings.",
+            "description": "Retrieve public config intended for front-end.",
             "operation": "?get=core_envinfo"
         }
     },
-    "/appinfo": {
+    "/appinfo/:package/:app": {
         "GET": {
-            "description": "Retrieve current Settings.",
+            "description": "Provide the manifest of a given App.",
             "operation": "?get=core_appinfo"
+        }
+    },
+    "/welcome": {
+        "GET": {
+            "description": "Redirects to eQual welcome screen.",
+            "operation": "?show=core_welcome"
+        }
+    },
+    "/discord": {
+        "GET": {
+            "description": "Redirects to eQual welcome screen.",
+            "operation": "?show=core_discord"
         }
     }
 }

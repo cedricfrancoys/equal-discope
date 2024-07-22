@@ -5,13 +5,19 @@
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
 use equal\orm\Domain;
+use equal\orm\Field;
 
-list($params, $providers) = announce([
-    'description'   => 'Returns a list of entites according to given domain (filter), start offset, limit and order.',
+list($params, $providers) = eQual::announce([
+    'description'   => 'Returns a list of entities according to given domain (filter), start offset, limit and order.',
     'params'        => [
         'entity' =>  [
-            'description'   => 'Full name (including namespace) of the class to look into (e.g. \'core\\User\').',
+            'description'   => 'Full name of the entity to collect.',
+            'help'          => "The entity is either a class or a controller, given with its full namespace (including the package).
+                                Classes are given with backslash separators (e.g. 'core\\User'),
+                                while controllers are given with underscore separators (e.g. 'core_model_collect').
+                                If a controller is given, it is expected to be a data handler (GET).",
             'type'          => 'string',
+            'usage'         => 'orm/entity',
             'required'      => true
         ],
         'fields' =>  [
@@ -25,7 +31,7 @@ list($params, $providers) = announce([
             'default'       => constant('DEFAULT_LANG')
         ],
         'domain' => [
-            'description'   => 'Criterias that results have to match (serie of conjunctions)',
+            'description'   => 'Criterias that results have to match (series of conjunctions)',
             'type'          => 'array',
             'default'       => []
         ],
@@ -62,17 +68,21 @@ list($params, $providers) = announce([
 ]);
 
 /**
- * @var \equal\php\Context          $context
- * @var \equal\orm\ObjectManager    $orm
- * @var \equal\data\DataAdapter     $adapter
+ * @var \equal\php\Context               $context
+ * @var \equal\orm\ObjectManager         $orm
+ * @var \equal\data\DataAdapterProvider  $dap
  */
-list($context, $orm, $adapter) = [ $providers['context'], $providers['orm'], $providers['adapt'] ];
+list($context, $orm, $dap) = [ $providers['context'], $providers['orm'], $providers['adapt'] ];
 
+/** @var \equal\data\adapt\DataAdapter */
+$adapter = $dap->get('json');
 
 /*
     Handle controller entities
 */
-$parts = explode('\\', $params['entity']);
+// #todo - standardize the way controllers are referred to as entities
+$entity = str_replace('_', '\\', $params['entity']);
+$parts = explode('\\', $entity);
 $file = array_pop($parts);
 if(ctype_lower(substr($file, 0, 1))) {
     $package = array_shift($parts);
@@ -81,11 +91,11 @@ if(ctype_lower(substr($file, 0, 1))) {
         throw new Exception("unknown_entity", QN_ERROR_INVALID_PARAM);
     }
     $operation = str_replace('\\', '_', $params['entity']);
-    // retrieve announcement of target contoller
+    // retrieve announcement of target controller
     $data = eQual::run('get', $operation, ['announce' => true]);
     $controller_schema = isset($data['announcement']['params'])?$data['announcement']['params']:[];
     $requested_fields = array_map(function($a) { return explode('.', $a)[0]; }, $params['fields'] );
-    // generata a virtual (emtpy) object
+    // generate a virtual (empty) object
     $object = ['id' => 0];
     foreach($requested_fields as $field) {
         if(!isset($controller_schema[$field])) {
@@ -93,11 +103,12 @@ if(ctype_lower(substr($file, 0, 1))) {
         }
         $value = null;
         if(isset($controller_schema[$field]['default'])) {
-            $value = $adapter->adapt($controller_schema[$field]['default'], $controller_schema[$field]['type'], 'txt', 'php');
+            $f = new Field($controller_schema[$field]);
+            $value = $adapter->adaptOut($controller_schema[$field]['default'], $f->getUsage());
         }
         $object[$field] = $value;
     }
-    // send single-itel collection as response
+    // send single-item collection as response
     $context->httpResponse()
             ->header('X-Total-Count', 1)
             ->body([$object])
@@ -148,6 +159,9 @@ foreach($params['fields'] as $key => $field) {
     }
 }
 
+// make sure 'name' is always requested
+$fields[] = 'name';
+
 $domain = $params['domain'];
 
 // if `deleted` field is requested, we need to force searching amongst deleted objects as well
@@ -190,14 +204,14 @@ $collection = $params['entity']::search($domain, [ 'sort' => $sort ]);
 
 $total = count($collection->ids());
 
-// retrieve list
+// retrieve list as an array
+// #memo - JSON objects handled by ES2015+ might have their keys order altered, so returning result as a map is not safe
 $result = $collection
-          ->shift($params['start'])
-          ->limit($params['limit'])
-          ->read($fields, $params['lang'])
-          ->adapt('txt')
-          // return result as an array (since JSON objects handled by ES2015+ might have their keys order altered)
-          ->get(true);
+        ->shift($params['start'])
+        ->limit($params['limit'])
+        ->read($fields, $params['lang'])
+        ->adapt('json')
+        ->get(true);
 
 $context->httpResponse()
         ->header('X-Total-Count', $total)

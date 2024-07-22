@@ -26,9 +26,9 @@ list($params, $providers) = eQual::announce([
 ]);
 
 /**
- * @var \equal\php\Context                  $context
- * @var \equal\auth\AuthenticationManager   $auth
- * @var \equal\dispatch\Dispatcher          $dispatch
+ * @var \equal\php\Context $context
+ * @var \equal\auth\AuthenticationManager $auth
+ * @var \equal\dispatch\Dispatcher $dispatch
  */
 list($context, $auth, $dispatch) = [ $providers['context'], $providers['auth'], $providers['dispatch']];
 

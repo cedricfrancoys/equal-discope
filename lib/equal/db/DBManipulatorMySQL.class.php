@@ -10,8 +10,7 @@ namespace equal\db;
  * DBManipulator implementation for MySQL server.
  *
  */
-
-class DBManipulatorMySQL extends DBManipulator {
+final class DBManipulatorMySQL extends DBManipulator {
 
 
     public static $types_associations = [
@@ -39,7 +38,8 @@ class DBManipulatorMySQL extends DBManipulator {
     }
 
     /**
-     * Open the DBMS connection
+     * Open the DBMS connection.
+     * This method is meant to assign a value to `$this->dbms_handler`.
      *
      * @param   boolean   $auto_select	Automatically connect to provided database (otherwise the connection is established only wity the DBMS server)
      * @return  integer   		        The status of the connect function call.
@@ -143,7 +143,7 @@ class DBManipulatorMySQL extends DBManipulator {
         return $columns;
     }
 
-    public function getTableConstraints($table_name) {
+    public function getTableUniqueConstraints($table_name) {
         $query = "SELECT * FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = '{$this->db_name}' AND TABLE_NAME = '$table_name' AND CONSTRAINT_TYPE = 'UNIQUE';";
         $res = $this->sendQuery($query);
         $constraints = [];
@@ -166,19 +166,6 @@ class DBManipulatorMySQL extends DBManipulator {
         return $query.";";
     }
 
-    /**
-     * Generates one or more SQL queries related to a column creation, according to given column definition.
-     *
-     * $def structure:
-     * [
-     *      'type'             => int(11),
-     *      'null'             => false,
-     *      'default'          => 0,
-     *      'auto_increment'   => false,
-     *      'primary'          => false,
-     *      'index'            => false
-     * ]
-     */
     public function getQueryAddColumn($table_name, $column_name, $def) {
         $sql = "ALTER TABLE `{$table_name}` ADD COLUMN `{$column_name}` {$def['type']}";
         if(isset($def['null']) && !$def['null']) {
@@ -202,7 +189,11 @@ class DBManipulatorMySQL extends DBManipulator {
         return $sql;
     }
 
-    public function getQueryAddConstraint($table_name, $columns) {
+    public function getQueryAddIndex($table_name, $column) {
+        return "ALTER TABLE `{$table_name}` ADD INDEX(`".$column."`);";
+    }
+
+    public function getQueryAddUniqueConstraint($table_name, $columns) {
         return "ALTER TABLE `{$table_name}` ADD CONSTRAINT ".implode('_', $columns)." UNIQUE (`".implode('`,`', $columns)."`);";
     }
 
@@ -226,10 +217,30 @@ class DBManipulatorMySQL extends DBManipulator {
         }
         $vals = rtrim($vals, ',');
         if(strlen($cols) > 0 && strlen($vals) > 0) {
-            // #memo - we ignore duplicate enties, if any
+            // #memo - we ignore duplicate entries, if any
             $sql = "INSERT IGNORE INTO `$table` ($cols) VALUES $vals;";
         }
         return $sql;
+    }
+
+    public function getQuerySetRecords($table, $fields) {
+        $sql = '';
+        // test values and types
+        if(empty($table)) {
+            throw new \Exception(__METHOD__." : unable to build sql query, parameter 'table' empty.", QN_ERROR_SQL);
+        }
+        if(empty($fields)) {
+            throw new \Exception(__METHOD__." : unable to build sql query, parameter 'fields' empty.", QN_ERROR_SQL);
+        }
+        // UPDATE clause
+        $sql = 'UPDATE `'.$table.'`';
+        // SET clause
+        $sql .= ' SET ';
+        foreach($fields as $key => $value) {
+            $sql .= "`$key`={$this->escapeString($value)}, ";
+        }
+        $sql = rtrim($sql, ', ');
+        return $sql.';';
     }
 
     /**
@@ -247,29 +258,36 @@ class DBManipulatorMySQL extends DBManipulator {
             return;
         }
 
-        if(($result = mysqli_query($this->dbms_handler, $query)) === false) {
-            throw new \Exception(__METHOD__.' : query failure. '.mysqli_error($this->dbms_handler).'. For query: "'.$query.'"', QN_ERROR_SQL);
-        }
-        // everything went well: perform additional operations (replication & info about query result)
-        else {
-            // update $affected_rows, $last_query, $last_id (depending on the performed operation)
-            $sql_operation = strtolower((explode(' ', $query, 2))[0]);
-            $this->setLastQuery($query);
-            if($sql_operation == 'select' || $sql_operation == 'show') {
-                $this->setAffectedRows(mysqli_num_rows($result));
+        try {
+            if(($result = mysqli_query($this->dbms_handler, $query)) === false) {
+                $error_msg = mysqli_error($this->dbms_handler);
+                trigger_error("SQL::error while executing query: {$error_msg}", QN_REPORT_ERROR);
+                throw new \Exception(__METHOD__.' : query failure ('.$error_msg.') for query: "'.$query.'"', QN_ERROR_SQL);
             }
+            // everything went well: perform additional operations (replication & info about query result)
             else {
-                // for WRITE operations, relay query to members of the replica
-                if(in_array($sql_operation, ['insert', 'update', 'delete', 'drop', 'create'])) {
-                    foreach($this->members as $member) {
-                        $member->sendQuery($query);
+                // update $affected_rows, $last_query, $last_id (depending on the performed operation)
+                $sql_operation = strtolower((explode(' ', $query, 2))[0]);
+                $this->setLastQuery($query);
+                if($sql_operation == 'select' || $sql_operation == 'show') {
+                    $this->setAffectedRows(mysqli_num_rows($result));
+                }
+                else {
+                    // for WRITE operations, relay query to members of the replica
+                    if(in_array($sql_operation, ['insert', 'update', 'delete', 'drop', 'create'])) {
+                        foreach($this->members as $member) {
+                            $member->sendQuery($query);
+                        }
                     }
+                    if($sql_operation =='insert') {
+                        $this->setLastId(mysqli_insert_id($this->dbms_handler));
+                    }
+                    $this->setAffectedRows(mysqli_affected_rows($this->dbms_handler));
                 }
-                if($sql_operation =='insert') {
-                    $this->setLastId(mysqli_insert_id($this->dbms_handler));
-                }
-                $this->setAffectedRows(mysqli_affected_rows($this->dbms_handler));
             }
+        }
+        catch(\Exception $e) {
+            throw new \Exception($e->getMessage().' ('.$e->getCode().')', QN_ERROR_SQL);
         }
         return $result;
     }
@@ -404,20 +422,6 @@ class DBManipulatorMySQL extends DBManipulator {
         return $sql;
     }
 
-    /**
-     * Get records from specified table, according to some conditions.
-     *
-     * @param	array   $tables       name of involved tables
-     * @param	array   $fields       list of requested fields
-     * @param	array   $ids          ids to which the selection is limited
-     * @param	array   $conditions   list of arrays (field, operand, value)
-     * @param	string  $id_field     name of the id field ('id' by default)
-     * @param	mixed   $order        string holding name of the order field or maps holding field nmaes as keys and sorting as value
-     * @param	integer $start
-     * @param	integer $limit
-     *
-     * @return	resource              reference to query resource
-     */
     public function getRecords($tables, $fields=NULL, $ids=NULL, $conditions=NULL, $id_field='id', $order=[], $start=0, $limit=0) {
         // cast tables to an array (passing a single table is accepted)
         if(!is_array($tables)) {
@@ -434,7 +438,7 @@ class DBManipulatorMySQL extends DBManipulator {
 
         // test values and types
         if(empty($tables)) {
-            throw new \Exception(__METHOD__." : unable to build sql query, parameter 'tables' array is empty.", QN_ERROR_SQL);
+            throw new \Exception(__METHOD__." : unable to build sql query, parameter 'tables' is empty.", QN_ERROR_SQL);
         }
         /* irrelevant
         if(!empty($fields) && !is_array($fields)) throw new \Exception(__METHOD__." : unable to build sql query, parameter 'fields' is not an array.", QN_ERROR_SQL);
@@ -494,42 +498,12 @@ class DBManipulatorMySQL extends DBManipulator {
     }
 
     public function setRecords($table, $ids, $fields, $conditions=null, $id_field='id'){
-        // test values and types
-        if(empty($table)) {
-            throw new \Exception(__METHOD__." : unable to build sql query, parameter 'table' empty.", QN_ERROR_SQL);
-        }
-        if(empty($fields)) {
-            throw new \Exception(__METHOD__." : unable to build sql query, parameter 'fields' empty.", QN_ERROR_SQL);
-        }
-
-        // UPDATE clause
-        $sql = 'UPDATE `'.$table.'`';
-
-        // SET clause
-        $sql .= ' SET ';
-        foreach ($fields as $key => $value) {
-            $sql .= "`$key`={$this->escapeString($value)}, ";
-        }
-        $sql = rtrim($sql, ', ');
-
-        // WHERE clause
+        $sql = rtrim($this->getQuerySetRecords($table, $fields), ';');
         $sql .= $this->getConditionClause($id_field, $ids, $conditions);
-
         return $this->sendQuery($sql);
     }
 
-    /**
-     * Inserts new records in specified table.
-     *
-     * @param	string $table name of the table in which insert the records
-     * @param	array $fields list of involved fields
-     * @param	array $values array of arrays specifying the values related to each specified field
-     * @return	resource reference to query resource
-     */
     public function addRecords($table, $fields, $values) {
-        if (!is_array($fields) || !is_array($values)) {
-            throw new \Exception(__METHOD__.' : at least one parameter is missing', QN_ERROR_SQL);
-        }
         $sql = $this->getQueryAddRecords($table, $fields, $values);
         return $this->sendQuery($sql);
     }
@@ -542,4 +516,23 @@ class DBManipulatorMySQL extends DBManipulator {
         return $this->sendQuery($sql);
     }
 
+    /**
+     * Fetch and increment the column of a series of records in a single operation.
+     *
+     * MySQL requires multi queries to support a single input with instructions separator.
+     * So we use LOCK TABLES and UNLOCK TABLES to make sure no change occurs between update and read.
+     */
+    public function incRecords($table, $ids, $field, $increment, $id_field='id') {
+        $res = null;
+        $this->sendQuery('LOCK TABLES `'.$table.'` WRITE;');
+        try {
+            $res = $this->sendQuery("SELECT `{$id_field}`, `{$field}` FROM `{$table}` WHERE `{$id_field}` in (".implode(',', (array) $ids).");");
+            $this->sendQuery("UPDATE `{$table}` SET `{$field}` = `{$field}` + $increment WHERE `{$id_field}` in (".implode(',', (array) $ids).");");
+        }
+        catch(\Exception $e) {
+            // prevent interruption before unlocking the table
+        }
+        $this->sendQuery('UNLOCK TABLES;');
+        return $res;
+    }
 }

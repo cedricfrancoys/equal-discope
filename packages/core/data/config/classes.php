@@ -4,7 +4,7 @@
     Some Rights Reserved, Cedric Francoys, 2010-2021
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
+list($params, $providers) = eQual::announce([
     'description'   => 'Returns the list of classes defined in specified package.',
     'params'        => [
         'package' => [
@@ -26,7 +26,9 @@ list($params, $providers) = announce([
     'providers'     => ['context']
 ]);
 
-
+/**
+ * @var \equal\php\Context  $context
+ */
 list($context) = [$providers['context']];
 
 
@@ -61,7 +63,7 @@ if(!function_exists('get_classes')) {
 	function get_classes($package, $path='') {
 		$data = [];
         $path = trim($path, '/');
-		$package_dir = 'packages/'.$package.'/classes';
+		$package_dir = QN_BASEDIR.'/packages/'.$package.'/classes';
         if(strlen($path)) {
             $package_dir .= '/'.$path;
         }
@@ -72,13 +74,12 @@ if(!function_exists('get_classes')) {
 	}
 }
 
-$data = array();
+$data = [];
 
 // if no package is given, return a map having packages as keys and arrays of related classes as values
 if($params['package'] == '*') {
 	// get listing of existing packages
-	$json = run('get', 'core_config_packages');
-	$packages = json_decode($json, true);
+	$packages = eQual::run('get', 'core_config_packages');
 	foreach($packages as $package) {
 		try {
 			$data[$package] = get_classes($package);

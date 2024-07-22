@@ -123,7 +123,13 @@ $fields_to_read = [];
 foreach($view_fields as $item) {
     $field =  $item['value'];
     $descr = $schema[$field];
-    if($descr['type'] == 'many2one') {
+    $type = $descr['type'];
+    // #todo - handle 'alias'
+    if($type == 'computed') {
+        $type = $descr['result_type'];
+    }
+
+    if($type == 'many2one') {
         $fields_to_read[$field] = ['id', 'name'];
     }
     else {
@@ -387,7 +393,7 @@ if($is_controller_entity) {
 }
 else {
     // with group_by support
-    // create initial stack of groups / objects
+    // create initial stack of goups / objects
     $stack = [$values];
     if(count($group_by) && !$is_controller_entity) {
         $groups = groupObjects($schema, $values, $group_by);

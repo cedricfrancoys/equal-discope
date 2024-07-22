@@ -90,12 +90,16 @@ class HttpMessage {
     protected static $HTTP_METHODS = ['GET', 'POST', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'PURGE', 'OPTIONS', 'TRACE', 'CONNECT'];
 
     /**
-    * Handle sub objects for deep cloning
-    *
-    */
+     * Handle sub objects for deep cloning
+     *
+     */
     public function __clone() {
-        if($this->uri)     $this->uri = clone $this->uri;
-        if($this->headers) $this->headers = clone $this->headers;
+        if($this->uri) {
+            $this->uri = clone $this->uri;
+        }
+        if($this->headers) {
+            $this->headers = clone $this->headers;
+        }
     }
 
     /**
@@ -123,7 +127,7 @@ class HttpMessage {
         '303' => 'See Other',
         '304' => 'Not Modified',
         '305' => 'Use Proxy',
-        '306' => '(aucun)',
+        '306' => '(none)',
         '307' => 'Temporary Redirect',
         '308' => 'Permanent Redirect',
         '310' => 'Too many Redirects',
@@ -231,7 +235,7 @@ class HttpMessage {
 
     public function setHeader($header, $value) {
         $this->headers->set($header, $value);
-        // maintain URI consitency
+        // maintain URI consistency
         if(strcasecmp($header, 'Host') === 0) {
             $this->uri->setHost($value);
         }
@@ -332,13 +336,13 @@ class HttpMessage {
                         if (empty($block)) continue;
                         // parse uploaded files
                         if (strpos($block, 'application/octet-stream') !== FALSE) {
-                        // match "name", then everything after "stream" (optional) except for prepending newlines
-                        preg_match("/name=\"([^\"]*)\".*stream[\n|\r]+([^\n\r].*)?$/s", $block, $matches);
+                            // match "name", then everything after "stream" (optional) except for prepending newlines
+                            preg_match("/name=\"([^\"]*)\".*stream[\n|\r]+([^\n\r].*)?$/s", $block, $matches);
                         }
                         // parse all other fields
                         else {
-                        // match "name" and optional value in between newline sequences
-                        preg_match('/name=\"([^\"]*)\"[\n|\r]+([^\n\r].*)?\r$/s', $block, $matches);
+                            // match "name" and optional value in between newline sequences
+                            preg_match('/name=\"([^\"]*)\"[\n|\r]+([^\n\r].*)?\r$/s', $block, $matches);
                         }
                         // assign param/value pair to related body index
                         $request[$matches[1]] = $matches[2];
@@ -355,7 +359,7 @@ class HttpMessage {
                 case 'application/json':
                 case 'application/javascript':
                 case 'text/javascript':
-                    // convert to JSON (with type convertion + fallback to string)
+                    // convert to JSON (with type conversion + fallback to string)
                     $arr = json_decode($body, true, 512, JSON_BIGINT_AS_STRING);
                     if(!is_null($arr)) {
                         $body = $arr;
@@ -420,7 +424,7 @@ class HttpMessage {
      *
      * can be forced to cast to array using $as_array boolean
      *
-     * @return HttpHeaders, array
+     * @return HttpHeaders|array
      *
      */
     public function getHeaders($as_array=false) {
@@ -479,7 +483,7 @@ class HttpMessage {
     /**
      * Retrieve a value from message body based on a given param name
      *
-     * @return mixed If $param is an array of parameters names, returns an assiociative array containing values for each given parameter, otherwise returns the value of a single parameter. If given parameter is not found, returns specified default value (fallback to null)
+     * @return mixed If $param is an array of parameters names, returns an associative array containing values for each given parameter, otherwise returns the value of a single parameter. If given parameter is not found, returns specified default value (fallback to null)
      */
     public function get($param, $default=null) {
         if(is_array($param)) {
@@ -508,7 +512,7 @@ class HttpMessage {
      * Assign a new parameter to message body, or update an existing one to a new value.
      * This method overwrites raw string value, if any.
      *
-     * @param   $param  mixed(string|array)    For single assignement, $param is the name of the parameter to be set. In case of bulk assign, $param is an associative array with keys and values respectively holding parameters names and values.
+     * @param   $param  mixed(string|array)    For single assignment, $param is the name of the parameter to be set. In case of bulk assign, $param is an associative array with keys and values respectively holding parameters names and values.
      * @param   $value  mixed   If $param is an array, $value is not taken under account (this argument is therefore optional)
      * @return  HttpMessage Returns current instance
      */
@@ -707,7 +711,7 @@ class HttpMessage {
     }
 
     /**
-     * send method is defined in HttpResponse and HttpRequest classes
+     * Send method is defined in HttpResponse and HttpRequest classes.
      *
      */
     public function send() {}
@@ -720,13 +724,13 @@ class HttpMessage {
      *
      * @link http://en.wikipedia.org/wiki/List_of_Ajax_frameworks#JavaScript
      *
-     * @return bool true if the request is an XMLHttpRequest, false otherwise
+     * @return bool     Returns true if the request is an XMLHttpRequest, false otherwise.
      */
     public function isXHR() {
-        return ('XMLHttpRequest' == $this->headers->get('X-Requested-With'));
+        return ($this->headers->get('X-Requested-With') == 'XMLHttpRequest');
     }
 
-    private static function xmlToArray(\SimpleXMLElement $obj) {
+   private static function xmlToArray(\SimpleXMLElement $obj) {
         $text = '';
         $attributes = [];
         $children = [];

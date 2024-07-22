@@ -14,7 +14,7 @@ namespace equal\orm;
  *                '{operand}', '{operator}', '{value}'    // condition
  *            ],
  *            [
- *                '{operand}', '{operator}', '{value}'    // another contition (AND)
+ *                '{operand}', '{operator}', '{value}'    // another condition (AND)
  *            ]
  *        ],
  *        [		                                          // another clause (OR)
@@ -22,7 +22,7 @@ namespace equal\orm;
  *				'{operand}', '{operator}', '{value}'      // condition
  *			  ],
  *            [
- *                '{operand}', '{operator}', '{value}'    // another contition (AND)
+ *                '{operand}', '{operator}', '{value}'    // another condition (AND)
  *            ]
  *        ]
  *    ];
@@ -31,7 +31,7 @@ namespace equal\orm;
 
 
 class Domain {
-
+    /** @var DomainClause[] */
     private $clauses;
 
     public function __construct($domain=[]) {
@@ -73,7 +73,7 @@ class Domain {
     }
 
     /**
-     * Add a clause at the Domain level : the clause is appened to the Domain
+     * Add a clause at the Domain level : the clause is append to the Domain
      */
     public function addClause($clause) {
         $this->clauses[] = $clause;
@@ -94,9 +94,22 @@ class Domain {
         return $this;
     }
 
+    /**
+     * Retrieve all fields that are potentially involved in the domain.
+     * This is used byt the ORM to know what fields must been read before evaluating a domain.
+     */
+    public function extractFields() {
+        $fields = [];
+        foreach($this->clauses as $clause) {
+            foreach($clause->conditions as $condition) {
+                $fields[] = $condition->operand;
+            }
+        }
+        return $fields;
+    }
 
     /**
-     * Update domain by parsing conditions and replace any occurence of `object.` and `user.` notations with related attributes of given objects.
+     * Update domain by parsing conditions and replace any occurrence of `object.` and `user.` notations with related attributes of given objects.
      *
      * @param values
      * @returns Domain  Returns current instance with updated values.
@@ -131,16 +144,15 @@ class Domain {
                     }
                 }
                 // handle user references as `value` part
-                else if(is_string($value) && strpos($value, 'user.') == 0) {
+                elseif(is_string($value) && strpos($value, 'user.') == 0) {
                     $target = substr($value, 0, strlen('user.'));
                     if(!$user || !isset($user[$target])) {
                         continue;
                     }
                     $value = $user[$target];
                 }
-                else if(is_string($value) && strpos($value, 'date.') == 0) {
-                    // #todo
-                    // $value = (new DateReference($value)).getDate().toISOString();
+                elseif(is_string($value) && strpos($value, 'date.') == 0) {
+                    $value = (new DateReference($value)).getDate();
                 }
 
                 $condition->value = $value;
@@ -151,7 +163,7 @@ class Domain {
 
     /**
      * Evaluate domain for a given object.
-     * Object structure has to comply with the operands mentionned in the conditions of the domain. If no, related conditions are ignored (skipped).
+     * Object structure has to comply with the operands mentioned in the conditions of the domain. If no, related conditions are ignored (skipped).
      *
      * @param object
      * @return boolean Return true if the object matches the domain, false otherwise.
@@ -246,12 +258,12 @@ class Domain {
     private static function conditionCheck($condition, $schema=[]) {
         // condition must be an array
         if(!is_array($condition)) {
-            trigger_error("ORM::condition is not an array", QN_REPORT_DEBUG);
+            trigger_error("ORM::condition is not an array", QN_REPORT_ERROR);
             return false;
         }
         // condition must be composed of 3 elements (field, operator, operand)
         if(count($condition) != 3) {
-            trigger_error("ORM::missing condition in domain", QN_REPORT_DEBUG);
+            trigger_error("ORM::missing condition in domain", QN_REPORT_ERROR);
             return false;
         }
         // we need to have access to class definition to fully check conditions
@@ -260,7 +272,7 @@ class Domain {
             $operator = $condition[1];
             // first operand (field) must be a valid field
             if(!in_array($field, array_keys($schema))) {
-                trigger_error("ORM::unknown field '{$field}' in domain", QN_REPORT_DEBUG);
+                trigger_error("ORM::unknown field '{$field}' in domain", QN_REPORT_ERROR);
                 return false;
             }
             // handle 'alias'
@@ -278,7 +290,7 @@ class Domain {
             }
             // operator must be amongst valid operators for specified field
             if(!in_array($operator, ObjectManager::$valid_operators[$target_type])) {
-                trigger_error("ORM::invalid operator '{$operator}' in domain", QN_REPORT_DEBUG);
+                trigger_error("ORM::invalid operator '{$operator}' in domain", QN_REPORT_ERROR);
                 return false;
             }
         }

@@ -14,7 +14,7 @@ class MessageModel extends Model {
         return [
             'name' => [
                 'type'              => 'string',
-                'description'       => 'Name of the model, for sytem identification.',
+                'description'       => 'Name of the model, for system identification.',
                 'required'          => true
             ],
 
@@ -27,7 +27,7 @@ class MessageModel extends Model {
             'description' => [
                 'type'              => 'string',
                 'description'       => "Description of the meaning of the message.",
-                'multilang'         => true                
+                'multilang'         => true
             ],
 
             'type' => [

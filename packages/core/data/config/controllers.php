@@ -4,64 +4,90 @@
     Some Rights Reserved, Cedric Francoys, 2010-2021
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
-    'description'   => 'Returns the list of controllers defined in given package',
+list($params, $providers) = eQual::announce([
+    'description'   => 'Returns the list of controllers defined in given package.',
+    'params'        => [
+        'package' => [
+            'description'   => 'Name of the package for which the list is requested',
+            'type'          => 'string',
+            'default'       => '*'
+        ]
+    ],
     'response'      => [
         'content-type'      => 'application/json',
         'charset'           => 'UTF-8',
         'accept-origin'     => '*'
     ],
-    'params'        => [
-        'package' => [
-            'description'   => 'Name of the package for which the list is requested',
-            'type'          => 'string',
-            'required'      => true
-        ]
+    'access' => [
+        'visibility'    => 'protected'
     ],
     'providers'     => ['context']
 ]);
 
+/**
+ * @var \equal\php\Context          $context
+ */
+list($context, $orm) = [$providers['context'], $providers['orm']];
 
-function glob_recursive($directory) {
-    $files = glob($directory.'/*.php');
-    foreach (glob($directory.'/*', GLOB_ONLYDIR|GLOB_NOSORT) as $dir) {
-        $files = array_merge($files, glob_recursive($dir));
+$result = [
+    'apps'      => [],
+    'actions'   => [],
+    'data'      => []
+];
+
+$packages = eQual::run('get', 'config_packages');
+
+if($params['package'] != '*') {
+    if(!in_array($params['package'], $packages)) {
+        throw new Exception('unknown_package', EQ_ERROR_INVALID_PARAM);
     }
-    return $files;
+    $packages = (array) $params['package'];
 }
 
-function recurse_dir($directory, $parent_name='') {
+foreach($packages as $package) {
+    $result['apps'] = array_merge($result['apps'], recurse_dir("packages/{$package}/apps", 'php', $package));
+    $result['actions'] = array_merge($result['actions'], recurse_dir("packages/{$package}/actions", 'php', $package));
+    $result['data'] = array_merge($result['data'], recurse_dir("packages/{$package}/data", 'php', $package));
+}
+
+$context->httpResponse()
+        ->body($result)
+        ->send();
+
+function has_sub_items($directory, $extension) {
+    $files = glob($directory.'/*.'.$extension);
+    if(count($files)) {
+        return true;
+    }
+    foreach(glob($directory.'/*', GLOB_ONLYDIR|GLOB_NOSORT) as $node) {
+        if(has_sub_items($node, $extension)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function recurse_dir($directory, $extension, $parent_name='') {
     $result = array();
     if( is_dir($directory) ) {
+        $dir_name = basename($directory);
         $list = glob($directory.'/*');
         foreach($list as $node) {
-            $scriptname = basename($node, '.php');
+            $script_name = basename($node, '.'.$extension);
             if(is_dir($node)) {
-                if(count(glob_recursive($node)) === 0) continue;
-                $result = array_merge($result, recurse_dir($node, (strlen($parent_name)?$parent_name.'_'.$scriptname:$scriptname)));
+                if($dir_name == 'apps') {
+                    // do not process subdirectories for apps
+                    continue;
+                }
+                if(!has_sub_items($node, $extension)) {
+                    continue;
+                }
+                $result = array_merge($result, recurse_dir($node, $extension, (strlen($parent_name)?$parent_name.'_'.$script_name:$script_name)));
             }
-            elseif(pathinfo($node, PATHINFO_EXTENSION) == 'php'){
-                $result[] = (strlen($parent_name)?$parent_name.'_':'').$scriptname;
+            elseif(pathinfo($node, PATHINFO_EXTENSION) == $extension){
+                $result[] = (strlen($parent_name)?$parent_name.'_':'').$script_name;
             }
         }
     }
     return $result;
 }
-
-$php_scripts = function ($directory) use ($params){
-	$result = array();
-    $result = recurse_dir("packages/{$params['package']}/$directory");
-	return $result;
-};
-
-
-$result = [
-    'apps'      => $php_scripts('apps'),
-    'actions'   => $php_scripts('actions'),
-    'data'      => $php_scripts('data')
-];
-
-
-$context->httpResponse()
-        ->body($result)
-        ->send();

@@ -1,66 +1,58 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
-    Some Rights Reserved, Cedric Francoys, 2010-2021
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
+    Some Rights Reserved, Cedric Francoys, 2010-2024
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
-    'description'   => 'Returns existing routes for a given API, along with their description and expected parameters',
-    'params'        => [
-                        'api'   => [
-                            'description'   => 'The name (string identifier) of the API for which routes are requested',
-                            'type'          => 'string',
-                            'required'      => true
-                       ]
+
+$packages = eQual::run('get', 'config_packages');
+
+list($params, $providers) = eQual::announce([
+    'description'   => 'This is the core_config_routes controller created with core_config_create-controller.',
+    'response'      => [
+        'content-type'  => 'application/json',
+        'charset'       => 'utf-8',
+        'accept-origin' => '*'
     ],
-    'providers'     => ['context', 'route']
+    'params'        => [
+        "package" => [
+            "type"          => "string",
+            'selection'     => array_combine(array_values($packages), array_values($packages)),
+            "required"      => true,
+            "description"   => "Package to inspect.",
+        ]
+    ],
+    'access'        => [
+        'visibility'    => 'protected',
+        'groups'        => ['users']
+    ],
+    'providers'         => ['context']
 ]);
 
+/**
+ * @var \equal\php\context  Context
+ */
+$context = $providers['context'];
 
-list($context, $router) = [$providers['context'], $providers['route']];
+$package = $params["package"];
 
-
-if(!file_exists(QN_BASEDIR."/config/routing/api_{$params['api']}.json")) {
-    throw new Exception("No API matches provided identifier", QN_ERROR_INVALID_PARAM);
-}
-
-$routes = $router->add(QN_BASEDIR."/config/routing/api_{$params['api']}.json")->getRoutes();
+$dir = EQ_BASEDIR."/packages/{$package}/init/routes";
 
 $result = [];
 
-foreach($routes as $path => $resolver) {
-    $batch = $router->normalize($path, $resolver);
-    foreach($batch as $route) {
-        if(isset($route['redirect']) || $route['operation']['type'] == 'show') continue;
+if(is_dir($dir)) {
+    $files = scandir($dir);
 
-        // add 'announce' parameter to force script to announce itself (script description)
-        $route['operation']['params']['announce'] = true;
-
-        $json = run($route['operation']['type'], $route['operation']['name'], $route['operation']['params']);
-        $announce = json_decode($json, true);
-
-        $descriptor = [
-            'uri'           => $path,
-            'method'        => $route['method'],
-            'operation'     => [ 'uri' => $resolver[$route['method']]['operation'] ],
-            'description'   => $route['description']
-        ];
-
-        if(isset($announce['announcement']['description'])) {
-            $descriptor['operation']['description'] = $announce['announcement']['description'];
+    foreach($files as $i => $file) {
+        // Cleaning files
+        if(strcmp($file, '.') === 0 || strcmp($file, '..') === 0) {
+            continue;
         }
 
-        if(isset($announce['announcement']['params'])) {
-            $descriptor['params'] = $announce['announcement']['params'];
-        }
-
-        if(isset($announce['announcement']['response'])) {
-            $descriptor['response'] = $announce['announcement']['response'];
-        }
-
-        $result[] = $descriptor;
+        $result = array_merge($result, [$file => json_decode(file_get_contents($dir."/".$file))]);
     }
-
 }
 
-$context->httpResponse()->body($result)->send();
+$context->httpResponse()
+        ->body($result)
+        ->send();

@@ -1,4 +1,4 @@
-    <?php
+<?php
 /*
     This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
     Some Rights Reserved, Cedric Francoys, 2010-2021
@@ -9,12 +9,11 @@ namespace equal\orm\usages;
 
 class UsageEmail extends Usage {
 
-    public function getType(): string {
-        return 'email';
-    }
-
-    public function getSqlType(): string {
-        return 'varchar(255)';
+    public function __construct(string $usage_str) {
+        parent::__construct($usage_str);
+        if($this->length == 0) {
+            $this->length = 255;
+        }
     }
 
     /**
@@ -38,10 +37,6 @@ class UsageEmail extends Usage {
                 }
             ]
         ];
-    }
-
-    public function export($value, $lang='en'): string {
-        return $value;
     }
 
 }

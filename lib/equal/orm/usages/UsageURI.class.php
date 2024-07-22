@@ -1,4 +1,4 @@
-    <?php
+<?php
 /*
     This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
     Some Rights Reserved, Cedric Francoys, 2010-2021
@@ -9,29 +9,42 @@ namespace equal\orm\usages;
 
 class UsageUri extends Usage {
 
-    public function getType(): string {
-        return 'uri';
-    }
-
-    public function getSqlType(): string {
-            return 'text';
+    public function __construct(string $usage_str) {
+        parent::__construct($usage_str);
+        if($this->length == 0) {
+            $this->length = 1024;
+        }
     }
 
     public function getConstraints(): array {
         switch($this->getSubtype()) {
-            /*
-                https://www.goo-gle.com:80/path/sub/?test&a=b#fragment
-                //www.google.com.ua
-                https://mail.google.com
-                http://mail.google.com
-                ldap://localhost:389/ou=people,o=myOrganization
-                https://a.b.com:80/path/sub/?query=test&a=b#fragment
-                ftp://ftp.mozilla.org/pub/mozilla.org/firefox/releases/
-                dns://192.168.1.1/ftp.example.org?type=A
-                file://localhost/path
-                ircs://irc.example.com:6697/#channel1,#channel2
-            */
+            case 'url.relative':
+                /*
+                    /a
+                    /a/b
+                    /a/b/c
+                */
+                return [
+                    'invalid_url' => [
+                        'message'   => 'String is not a valid relative URL.',
+                        'function'  =>  function($value) {
+                            return (bool) (preg_match('/^(\/([^\/])+)+$/', $value));
+                        }
+                    ]
+                ];
             case 'url':
+                /*
+                    https://www.goo-gle.com:80/path/sub/?test&a=b#fragment
+                    //www.google.com.ua
+                    https://mail.google.com
+                    http://mail.google.com
+                    ldap://localhost:389/ou=people,o=myOrganization
+                    https://a.b.com:80/path/sub/?query=test&a=b#fragment
+                    ftp://ftp.mozilla.org/pub/mozilla.org/firefox/releases/
+                    dns://192.168.1.1/ftp.example.org?type=A
+                    file://localhost/path
+                    ircs://irc.example.com:6697/#channel1,#channel2
+                */
                 return [
                     'invalid_url' => [
                         'message'   => 'String is not a valid URL.',
@@ -40,7 +53,7 @@ class UsageUri extends Usage {
                         }
                     ]
                 ];
-            case 'uri/url.tel':
+            case 'url.tel':
                 return [
                     'invalid_url' => [
                         'message'   => 'String is not a valid tel URL.',
@@ -49,7 +62,7 @@ class UsageUri extends Usage {
                         }
                     ]
                 ];
-            case 'uri/url.mailto':
+            case 'url.mailto':
                 return [
                     'invalid_url' => [
                         'message'   => 'String is not a valid mailto URL.',
@@ -77,10 +90,7 @@ class UsageUri extends Usage {
                     ]
                 ];
         }
-    }
-
-    public function export($value, $lang='en'): string {
-        return $value;
+        return [];
     }
 
 }

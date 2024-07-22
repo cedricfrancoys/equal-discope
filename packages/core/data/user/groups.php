@@ -1,14 +1,14 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
-    Some Rights Reserved, Cedric Francoys, 2010-2021
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
+    Some Rights Reserved, Cedric Francoys, 2010-2024
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
 use core\User;
 use core\Group;
 
-list($params, $providers) = announce([
-    'description'   => 'Grant additional privilege to given user.',
+list($params, $providers) = eQual::announce([
+    'description'   => 'List all groups of a given user.',
     'response'      => [
         'content-type'  => 'application/json',
         'charset'       => 'UTF-8',
@@ -16,15 +16,15 @@ list($params, $providers) = announce([
     ],
     'params'        => [
         'user' =>  [
-            'description'   => 'login (email address) or ID of targeted user.',
+            'description'   => 'Login (email address) or ID of targeted user.',
             'type'          => 'string',
             'required'      => true
         ]
     ],
-    'providers'     => ['context', 'auth', 'access', 'orm']
+    'providers'     => ['context', 'auth', 'access']
 ]);
 
-list($context, $orm, $am, $ac) = [ $providers['context'], $providers['orm'], $providers['auth'], $providers['access'] ];
+list($context, $am, $ac) = [ $providers['context'], $providers['auth'], $providers['access'] ];
 
 
 // retrieve targeted user
@@ -44,13 +44,13 @@ else {
 
 $user_id = array_shift($ids);
 
-$groups_ids = $ac->groups($user_id);
+$groups_ids = $ac->getUserGroups($user_id);
 
 $groups = Group::ids($groups_ids)->read(['id', 'name'])->get();
 
-$groups_txt = array_map(function($a) {return $a['name'];}, $groups);
+$groups_names = array_map(function($a) {return $a['name'];}, $groups);
 
 $context->httpResponse()
         ->status(200)
-        ->body(['result' => implode(', ', $groups_txt)])
+        ->body($groups_names)
         ->send();

@@ -6,23 +6,35 @@
 */
 namespace equal\orm;
 
+use equal\services\Container;
 
 /**
  * Root Model for all Object definitions.
  * This class holds the description of an object along with the values of the currently assigned fields.
  *
  * List of static methods for building new Collection objects (accessed through magic methods):
- *
  * @method \equal\orm\Collection id($id)
  * @method \equal\orm\Collection ids(array $ids=[])
  * @method \equal\orm\Collection search(array $domain=[], array $params=[], $lang=null)
  * @method \equal\orm\Collection create(array $values=null, $lang=null)
+ *
+ * List of static method with variable parameters:
+ * @method array canread($orm, $ids=[], $fields=[], $lang='en')
+ * @method array cancreate($orm, $values=[], $lang='en')
+ * @method array canupdate($orm, $ids=[], $values=[], $lang='en')
+ * @method array canclone($orm, $ids=[])
+ * @method array candelete($orm, $ids=[])
+ * @method array onchange($orm, $event=[], $values=[], $lang='en')
+ * @method void oncreate($orm, $ids=[], $values=[], $lang='en')
+ * @method void onupdate($orm, $ids=[], $values=[], $lang='en')
+ * @method void onclone($orm, $ids=[])
+ * @method void ondelete($orm, $ids=[])
  */
 class Model implements \ArrayAccess, \Iterator {
 
     /**
      * Complete object schema: an associative array mapping fields names with their definition.
-     * Schema is the concatenation of spcecial-columns and custom-defined columns.
+     * Schema is the concatenation of special-columns and custom-defined columns.
      * @var array
      */
     private $schema;
@@ -43,7 +55,7 @@ class Model implements \ArrayAccess, \Iterator {
 
 
     /**
-     * Constructor: initiliases members vars and set fields to values, if given.
+     * Constructor: initializes members vars and set fields to values, if given.
      *
      */
     public final function __construct($values=[]) {
@@ -52,14 +64,29 @@ class Model implements \ArrayAccess, \Iterator {
         // build the schema based on current class and ancestors
         $this->schema = self::getSpecialColumns();
         // piles up the getColumns methods from oldest ancestor to called class
-        $parent_class = get_parent_class(get_called_class());
-        $parents_classes = [get_called_class()];
-        while( $parent_class != __CLASS__) {
+        $called_class = get_called_class();
+        $parent_class = get_parent_class($called_class);
+        $parents_classes = [$called_class];
+        while($parent_class != __CLASS__) {
             array_unshift($parents_classes, $parent_class);
             $parent_class = get_parent_class($parent_class);
         }
+        // build schema
         foreach($parents_classes as $class) {
             $this->schema = array_merge($this->schema, (array) call_user_func_array([$class, 'getColumns'], []));
+        }
+        // inject dependencies (constants)
+        if(method_exists($called_class, 'constants')) {
+            $constants = $called_class::constants();
+            foreach($constants as $name) {
+                if(\config\defined($name) && !defined($name)) {
+                    $value = \config\constant($name);
+                    \config\export($name, $value);
+                }
+                if(!defined($name)) {
+                    throw new \Exception("Requested constant {$name} is missing from configuration", QN_ERROR_INVALID_CONFIG);
+                }
+            }
         }
         // make sure that a field 'name' is always defined
         if( !isset($this->schema['name']) ) {
@@ -70,13 +97,15 @@ class Model implements \ArrayAccess, \Iterator {
         // get default values, set fields for default language, and mark fields as modified
         foreach($fields as $field) {
             // init related field instance
-            $this->fields[$field] = Fields::create($this->schema[$field]);
+            $this->fields[$field] = new Field($this->schema[$field], $field);
         }
         // set fields to default values
         $this->setDefaults($values);
     }
 
     private function setDefaults($values=[]) {
+        $container = Container::getInstance();
+        $orm = $container->get('orm');
         $defaults = $this->getDefaults();
         // reset fields values
         $this->values = [];
@@ -88,8 +117,25 @@ class Model implements \ArrayAccess, \Iterator {
                 $this->values[$field] = $values[$field];
             }
             elseif(isset($defaults[$field])) {
-                // #memo - default value should be either a simple type, a PHP expression, or a PHP function (executed at definition parsing)
-                $this->values[$field] = $defaults[$field];
+                if(is_callable($defaults[$field])) {
+                    // either a php function (or a function from the global scope) or a closure object
+                    if(is_object($defaults[$field])) {
+                        // default is a closure
+                        $this->values[$field] = $defaults[$field]();
+                    }
+                    else {
+                        // do not call since there is an ambiguity (e.g. 'time')
+                        $this->values[$field] = $defaults[$field];
+                    }
+                }
+                elseif(is_string($defaults[$field]) && method_exists($this->getType(), $defaults[$field])) {
+                    // default is a method of the class (or parents')
+                    $this->values[$field] = $orm->callonce($this->getType(), $defaults[$field]);
+                }
+                else {
+                    // default is a scalar value
+                    $this->values[$field] = $defaults[$field];
+                }
             }
         }
     }
@@ -99,7 +145,9 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
 
-    /* Magic properties */
+    /**
+     * Magic properties
+     */
 
     public function __get($field) {
         return $this->values[$field];
@@ -110,7 +158,9 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
 
-    /* ArrayAccess methods */
+    /**
+     * ArrayAccess methods
+     */
 
     public function offsetSet($field, $value): void {
         if (!is_null($field)) {
@@ -124,7 +174,12 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
     public function offsetUnset($field): void {
-        unset($this->values[$field]);
+        if(isset($this->fields[$field])) {
+            unset($this->fields[$field]);
+        }
+        if(isset($this->values[$field])) {
+            unset($this->values[$field]);
+        }
     }
 
     public function offsetGet($field) {
@@ -132,7 +187,9 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
 
-    /* Iterator methods */
+    /**
+     * Iterator methods
+     */
 
     public function rewind() : void {
         reset($this->values);
@@ -181,26 +238,30 @@ class Model implements \ArrayAccess, \Iterator {
             ],
             'creator' => [
                 'type'              => 'many2one',
-                'foreign_object'    => 'core\User'
+                'foreign_object'    => 'core\User',
+                'default'           => QN_ROOT_USER_ID
             ],
             'created' => [
                 'type'              => 'datetime',
-                'default'           => time(),
+                'default'           => function() { return time(); },
                 'readonly'          => true
             ],
             'modifier' => [
                 'type'              => 'many2one',
-                'foreign_object'    => 'core\User'
+                'foreign_object'    => 'core\User',
+                'default'           => QN_ROOT_USER_ID
             ],
             'modified' => [
                 'type'              => 'datetime',
-                'default'           => time(),
+                'default'           => function() { return time(); },
                 'readonly'          => true
             ],
+            // #memo - when set to true, modifier points to the user who deleted the object and modified is the time of the deletion
             'deleted' => [
                 'type'              => 'boolean',
                 'default'           => false
             ],
+            // system related state of the object
             'state' => [
                 'type'              => 'string',
                 'selection'         => ['draft', 'instance', 'archive'],
@@ -208,22 +269,6 @@ class Model implements \ArrayAccess, \Iterator {
             ]
         ];
         return $special_columns;
-    }
-
-    /**
-     * #todo - deprecate : this method should no longer be used
-     * @deprecated
-     */
-    public final function setField($field, $value) {
-        $this->values[$field] = $value;
-    }
-
-    /**
-     * #todo - deprecate : this method doesn't seem to be used
-     * @deprecated
-     */
-    public final function setColumn($column, array $description) {
-        $this->schema[$column] = $description;
     }
 
     /**
@@ -264,7 +309,7 @@ class Model implements \ArrayAccess, \Iterator {
      * @return array
      */
     public static function getDescription() {
-        return 'Interface for model defintion classes.';
+        return 'Interface for model definition classes.';
     }
 
     /**
@@ -279,19 +324,32 @@ class Model implements \ArrayAccess, \Iterator {
 
     /**
      * Returns fields as Field objects.
-     * #memo - $fields member might be uncomplete (fields isntances are created when requested for the first time)
+     * #memo - $fields member might be incomplete (fields instances are created when requested for the first time)
      *
      * @return Field[]    Associative array mapping fields names with their related Field instances.
-     * #deprecated
+     * @deprecated
      */
     public final function getFields() {
         return $this->fields;
     }
 
-    public final function getField($field) {
-        if(!isset($this->fields[$field])) {
-            if(isset($this->schema[$field])) {
-                $this->fields[$field] = Fields::create($this->schema[$field]);
+    /**
+     * Returns a Field object that corresponds to the descriptor of the given field (from schema).
+     * If a field is an alias, it is the final descriptor of the alias chain that is returned.
+     *
+     * @return Field        Associative array mapping fields names with their related Field instances.
+     */
+    public final function getField($field): Field {
+        if(isset($this->schema[$field])) {
+            $type = $this->schema[$field]['type'];
+            while($type == 'alias') {
+                $field = $this->schema[$field]['alias'];
+                $type = $this->schema[$field]['type'];
+            }
+            if(!isset($this->fields[$field])) {
+                if(isset($this->schema[$field])) {
+                    $this->fields[$field] = new Field($this->schema[$field], $field);
+                }
             }
         }
         return (isset($this->fields[$field]))?$this->fields[$field]:null;
@@ -313,7 +371,7 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
     /**
-     * Returns values of static instance (default values)
+     * Returns values of static instance (default values).
      *
      */
     public final function getValues() {
@@ -321,11 +379,76 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
     /**
-     * Returns the user-defined part of the schema (i.e. fields list with types and other attributes)
+     * Returns the user-defined part of the schema (i.e. fields list with types and other attributes).
      * This method must be overridden by children classes.
      *
      */
     public static function getColumns() {
+        return [];
+    }
+
+    /**
+     * Returns the workflow associated with the entity.
+     * This method is meant to be overridden by children classes.
+     *
+     */
+    public static function getWorkflow() {
+        return [];
+    }
+
+
+    /**
+     * Returns an associative array describing the roles that are defined on the current entity.
+     *
+     * Roles descriptor example:
+     *   return [
+     *       'owner': {
+     *            'description': ""
+     *        },
+     *        'admin': {
+     *            'description': "",
+     *            'implied_by': ['owner']
+     *        },
+     *        'editor': {
+     *            'description': "",
+     *            'implied_by': ['admin']
+     *        },
+     *        'viewer': {
+     *            'description': "",
+     *            'implied_by': ['editor']
+     *        }
+     *    ]
+     */
+    public static function getRoles() {
+        return [];
+    }
+
+    /**
+     * Returns the associative array mapping policies names with related descriptors.
+     * This method is meant to be overridden by children classes.
+     *
+     * A policy descriptor contains a description and a pointer to the policy handler (method).
+     * Policy handlers are meant to receive a collection and a user_id, and return an associative array mapping errors ids with their related description.
+     * If returned array is empty, the context complies with the policy.
+     *
+     * Policy descriptor example :
+     *
+     *  'publishable'   => [
+	 *		'description'		=> "Policy defining the rules for an object to be publishable.",
+	 *		'function'          => 'policyPublishable'
+	 *	]
+     *
+     */
+    public static function getPolicies() {
+        return [];
+    }
+
+    /**
+     * Returns the associative array mapping actions names with related descriptors of the actions defined by the entity.
+     * This method is meant to be overridden by children classes.
+     *
+     */
+    public static function getActions() {
         return [];
     }
 
@@ -349,6 +472,8 @@ class Model implements \ArrayAccess, \Iterator {
     }
 
     /**
+     * Returns an associative array mapping field names with their default values.
+     * If overloaded, methods from children classes must merge their result with values returned from parent class.
      *
      */
     public function getDefaults() {
@@ -363,7 +488,7 @@ class Model implements \ArrayAccess, \Iterator {
 
     /**
      * Provide the list of unique rules (array of combinations of fields).
-     * This method can be overriden to define a more precise set of unique constraints (i.e when keys are formed of several fields).
+     * This method can be overridden to define a more precise set of unique constraints (i.e when keys are formed of several fields).
      *
      */
     public function getUnique() {
@@ -395,127 +520,6 @@ class Model implements \ArrayAccess, \Iterator {
         return strtolower(str_replace('\\', '_', $entity));
     }
 
-
-    /**
-     * Check wether an object can be created.
-     * These tests come in addition to the unique constraints return by method `getUnique()`.
-     * This method can be overriden to define a more precise set of tests.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $values     Associative array holding the values to be assigned to the new instance (not all fields might be set).
-     * @param  string           $lang       Language in which multilang fields are being updated.
-     * @return array            Returns an associative array mapping fields with their error messages. An empty array means that object has been successfully processed and can be created.
-     */
-    public static function cancreate($om, $values, $lang) {
-        return [];
-    }
-
-    /**
-     * Check wether an object can be updated.
-     * These tests come in addition to the unique constraints return by method `getUnique()`.
-     * This method can be overriden to define a more precise set of tests.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @param  array            $values     Associative array holding the new values to be assigned.
-     * @param  string           $lang       Language in which multilang fields are being updated.
-     * @return array            Returns an associative array mapping fields with their error messages. An empty array means that object has been successfully processed and can be updated.
-     */
-    public static function canupdate($om, $oids, $values, $lang) {
-        return [];
-    }
-
-    /**
-     * Check wether an object can be cloned.
-     * These tests come in addition to the unique constraints return by method `getUnique()`.
-     * This method can be overriden to define a more precise set of tests.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @return array            Returns an associative array mapping fields with their error messages. En empty array means that object has been successfully processed and can be updated.
-     */
-    public static function canclone($om, $oids) {
-        return [];
-    }
-
-    /**
-     * Check wether an object can be deleted.
-     * This method can be overriden to define a more precise set of tests.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @return array            Returns an associative array mapping fields with their error messages. An empty array means that object has been successfully processed and can be deleted.
-     */
-    public static function candelete($om, $oids) {
-        return [];
-    }
-
-    /**
-     * Hook invoked after object creation for performing object-specific additional operations.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers. Should contain only the id of the object just created.
-     * @param  array            $values     Associative array holding the newly assigned values.
-     * @param  string           $lang       Language in which multilang fields are being created.
-     * @return void
-     */
-    public static function oncreate($om, $oids, $values, $lang) {
-    }
-
-    /**
-     * Hook invoked before object update for performing object-specific additional operations.
-     * Current values of the object can still be read for comparing with new values.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @param  array            $values     Associative array holding the new values that have been assigned.
-     * @param  string           $lang       Language in which multilang fields are being updated.
-     * @return void
-     */
-    public static function onupdate($om, $oids, $values, $lang) {
-        // upon state update (to 'archived' or 'deleted'), remove any pending alert related to the object
-        if(isset($values['state']) && $values['state'] != 'instance') {
-            $messages_ids = $om->search('core\alert\Message', [ ['object_class', '=', get_called_class()], ['object_id', 'in', $oids] ] );
-            if($messages_ids) {
-                $om->delete('core\alert\Message', $messages_ids, true);
-            }
-        }
-    }
-
-    /**
-     * Hook invoked after object cloning for performing object-specific additional operations.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @return void
-     */
-    public static function onclone($om, $oids) {
-    }
-
-    /**
-     * Hook invoked before object deletion for performing object-specific additional operations.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @return void
-     */
-    public static function ondelete($om, $oids) {
-    }
-
-    /**
-     * Signature for single object values change in UI.
-     * This mehtod does not imply an actual update of the model, but a potential one (not made yet) and is intended for front-end only.
-     *
-     * @param  ObjectManager    $om         ObjectManager instance.
-     * @param  array            $oids       List of objects identifiers.
-     * @param  array            $event      Associative array holding changed fields as keys, and their related new values.
-     * @param  array            $values     Copy of the current (partial) state of the object.
-     * @return array            Returns an associative array mapping fields with their resulting values.
-     */
-    public static function onchange($om, $event, $values, $lang) {
-        return [];
-    }
-
     public static function id($id) {
         return self::ids((array) $id);
     }
@@ -530,7 +534,6 @@ class Model implements \ArrayAccess, \Iterator {
         }
         return null;
     }
-
 
     public static function search(array $domain=[], array $params=[], $lang=null) {
         if(is_callable('equal\orm\Collections::getInstance')) {
@@ -557,6 +560,7 @@ class Model implements \ArrayAccess, \Iterator {
     /**
      * Handler for virtual static methods: use classname to invoke a Collection method, if available.
      * #todo - deprecate : since we cover all entry points with static methods, magic methods should no longer be involved.
+     * (in order to do this, we must streamline the signatures for on...() and can...() methods )
      *
      * @param  string   $name       Name of the called method.
      * @param  array    $arguments  Array holding a list of arguments to relay to the invoked method.

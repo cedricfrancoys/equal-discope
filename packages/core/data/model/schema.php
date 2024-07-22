@@ -1,9 +1,13 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
     Some Rights Reserved, Cedric Francoys, 2010-2021
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
+
+use equal\orm\Field;
+use equal\orm\ObjectManager;
+
 list($params, $providers) = announce([
     'description'   => "Returns the schema of given class (model) in JSON",
     'params'        => [
@@ -21,8 +25,15 @@ list($params, $providers) = announce([
     'providers'     => ['context', 'orm', 'adapt']
 ]);
 
+/**
+ * @var \equal\php\Context               $context
+ * @var \equal\orm\ObjectManager         $orm
+ * @var \equal\data\DataAdapterProvider  $dap
+ */
+list($context, $orm, $dap) = [$providers['context'], $providers['orm'], $providers['adapt']];
 
-list($context, $orm, $adapt) = [$providers['context'], $providers['orm'], $providers['adapt']];
+/** @var \equal\data\adapt\DataAdapter */
+$adapter = $dap->get('json');
 
 
 $data = [];
@@ -62,22 +73,15 @@ if(!count($data)) {
     $schema = $model->getSchema();
 
     // retrieve parent class
-    $data['parent'] = get_parent_class($model);
-
-    // retrieve root class (before Model)
-    $root = $data['parent'];
-    while($root != 'equal\orm\Model') {
-        $prev_parent = get_parent_class($root);
-        if($prev_parent == 'equal\orm\Model') {
-            break;
-        }
-        $root = $prev_parent;
-    }
-
-    $data['root'] = $root;
-    $data['table'] = $model->getTable();
-    $data['link'] = $model->getLink();
-    $data['fields'] = $schema;
+    $data = [
+        'name'          => $model->getName(),
+        'description'   => $model->getDescription(),
+        'parent'        => get_parent_class($model),
+        'root'          => ObjectManager::getObjectRootClass($params['entity']),
+        'table'         => $model->getTable(),
+        'link'          => $model->getLink(),
+        'fields'        => $schema
+    ];
 
     if(method_exists($model, 'getUnique')) {
         $data['unique'] = $model->getUnique();
@@ -89,9 +93,8 @@ if(!count($data)) {
             if(is_callable($defaults[$field])) {
                 $default = call_user_func($defaults[$field], $orm);
             }
-            $type = $schema[$field]['type'];
-            $adapted = $adapt->adapt($default, $type, 'txt', 'php');
-            $data['fields'][$field]['default'] = $adapted;
+            $f = $model->getField($field);
+            $data['fields'][$field]['default'] = $adapter->adaptOut($default, $f->getUsage());
         }
     }
 

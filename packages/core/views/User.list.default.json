@@ -40,6 +40,14 @@
             },
             {
                 "type": "field",
+                "value": "fullname",
+                "width": "20%",
+                "widget": {
+                    "readonly": true
+                }
+            },
+            {
+                "type": "field",
                 "value": "language",
                 "width": "10%",
                 "widget": {

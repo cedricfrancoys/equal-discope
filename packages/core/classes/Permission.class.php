@@ -8,6 +8,16 @@ namespace core;
 
 use equal\orm\Model;
 
+/**
+ * @property alias      $name
+ * @property string     $class_name     Full name of the entity to which the permission rule applies.
+ * @property string     $domain         JSON value of the constraints domain (ex. ['creator', '=', '1'])
+ * @property integer    $object_id      Identifier of the specific object on which the permission applies.
+ * @property integer    $group_id       Targeted group, if permission applies to a group.
+ * @property integer    $user_id        Targeted user, if permission applies to a single user.
+ * @property integer    $rights         Rights binary mask (1: CREATE, 2: READ, 4: WRITE, 8 DELETE, 16: MANAGE)
+ * @property string     $rights_txt
+ */
 class Permission extends Model {
 
     public static function getColumns() {
@@ -24,16 +34,22 @@ class Permission extends Model {
             ],
 
             'domain' => [
+                'deprecated'        => "use `getRole()` for each specific Model",
                 'type'              => 'string',
                 'description'       => "JSON value of the constraints domain (ex. ['creator', '=', '1'])",
                 'default'           => NULL
+            ],
+
+            'object_id' => [
+                'type'              => 'integer',
+                'description'       => "Identifier of the specific object on which the permission applies."
             ],
 
             'group_id' => [
                 'type'              => 'many2one',
                 'foreign_object'    => 'core\Group',
                 'description'       => "Targeted group, if permission applies to a group.",
-                'default'           => QN_DEFAULT_GROUP_ID
+                'default'           => EQ_DEFAULT_GROUP_ID
             ],
 
             'user_id' => [
@@ -44,8 +60,8 @@ class Permission extends Model {
 
             'rights' => [
                 'type' 	            => 'integer',
-                'onupdate'          => 'onupdateRights',
-                'description'       => "Rights binary mask (1: CREATE, 2: READ, 4: WRITE, 8 DELETE, 16: MANAGE)"
+                'description'       => "Rights binary mask (1: CREATE, 2: READ, 4: WRITE, 8 DELETE, 16: MANAGE)",
+                'dependents'        => ['rights_txt']
             ],
 
             // virtual field, used in list views
@@ -58,24 +74,30 @@ class Permission extends Model {
         ];
     }
 
-    public static function onupdateRights($om, $ids, $values, $lang) {
-        $om->update(__CLASS__, $ids, ['rights_txt' => null], $lang);
-    }
-
-    public static function calcRightsTxt($om, $ids, $lang) {
-        $res = [];
-        $values = $om->read(__CLASS__, $ids, ['rights'], $lang);
-        foreach($ids as $oid) {
-            $rights_txt = [];
-            $rights = $values[$oid]['rights'];
-            if($rights & QN_R_CREATE)   $rights_txt[] = 'create';
-            if($rights & QN_R_READ)     $rights_txt[] = 'read';
-            if($rights & QN_R_WRITE)    $rights_txt[] = 'write';
-            if($rights & QN_R_DELETE)   $rights_txt[] = 'delete';
-            if($rights & QN_R_MANAGE)   $rights_txt[] = 'manage';
-            $res[$oid] = implode(', ', $rights_txt);
+    public static function calcRightsTxt($self) {
+        $result = [];
+        $self->read(['rights']);
+        foreach($self as $id => $permission) {
+            $txt = [];
+            $rights = $permission['rights'];
+            if($rights & EQ_R_CREATE) {
+                $txt[] = 'create';
+            }
+            if($rights & EQ_R_READ) {
+                $txt[] = 'read';
+            }
+            if($rights & EQ_R_WRITE) {
+                $txt[] = 'write';
+            }
+            if($rights & EQ_R_DELETE) {
+                $txt[] = 'delete';
+            }
+            if($rights & EQ_R_MANAGE) {
+                $txt[] = 'manage';
+            }
+            $result[$id] = implode(', ', $txt);
         }
-        return $res;
+        return $result;
     }
 
 }

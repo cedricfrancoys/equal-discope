@@ -4,7 +4,10 @@
     Some Rights Reserved, Cedric Francoys, 2010-2021
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
+use equal\orm\Field;
+use equal\orm\Collections;
+
+list($params, $providers) = eQual::announce([
     'description'   => "Transform an object being edited in a view, according to the onchange method of the entity, if any.",
     'response'      => [
         'content-type'  => 'application/json',
@@ -41,11 +44,14 @@ list($params, $providers) = announce([
 ]);
 
 /**
- * @var \equal\php\Context          $context
- * @var \equal\orm\ObjectManager    $orm
- * @var \equal\data\DataAdapter     $adapter
+ * @var \equal\php\Context               $context
+ * @var \equal\orm\ObjectManager         $orm
+ * @var \equal\data\DataAdapterProvider  $dap
  */
-list($context, $orm, $adapter) = [$providers['context'], $providers['orm'], $providers['adapt']];
+list($context, $orm, $dap) = [$providers['context'], $providers['orm'], $providers['adapt']];
+
+/** @var \equal\data\adapt\DataAdapter */
+$adapter = $dap->get('json');
 
 $result = [];
 
@@ -54,70 +60,108 @@ if(!$model) {
     throw new Exception("unknown_entity", QN_ERROR_INVALID_PARAM);
 }
 
-// adapt received values for parameter 'values' and 'changes' (which are still formated as text)
-$schema = $model->getSchema();
+if(method_exists($params['entity'], 'onchange')) {
+    // adapt received values for parameter 'values' and 'changes' (which are still formatted as text)
+    $schema = $model->getSchema();
 
-// keep only known and non-empty fields (allow null values)
+    // keep only known and non-empty fields (allow null values)
 
-$values = array_filter($params['values'], function($val, $field) use ($schema){
-    return (is_array($val) || strlen(strval($val)) || is_null($val) || in_array($schema[$field]['type'], ['boolean', 'string', 'text']) ) && isset($schema[$field]);
-}, ARRAY_FILTER_USE_BOTH);
+    $values = array_filter($params['values'], function($val, $field) use ($schema){
+            return (is_array($val) || strlen(strval($val)) || is_null($val) || in_array($schema[$field]['type'], ['boolean', 'string', 'text']) ) && isset($schema[$field]);
+        }, ARRAY_FILTER_USE_BOTH);
 
-$changes = array_filter($params['changes'], function($val, $field) use ($schema){
-    return (is_array($val) || strlen(strval($val)) || is_null($val) || in_array($schema[$field]['type'], ['boolean', 'string', 'text']) ) && isset($schema[$field]);
-}, ARRAY_FILTER_USE_BOTH);
+    $changes = array_filter($params['changes'], function($val, $field) use ($schema){
+            return (is_array($val) || strlen(strval($val)) || is_null($val) || in_array($schema[$field]['type'], ['boolean', 'string', 'text']) ) && isset($schema[$field]);
+        }, ARRAY_FILTER_USE_BOTH);
 
-
-// adapt fields in values array
-foreach($values as $field => $value) {
-    $type = $schema[$field]['type'];
-    if($type == 'computed') {
-        $type = $schema[$field]['result_type'];
-    }
-    try {
-        // adapt received values based on their type (as defined in schema)
-        $values[$field] = $adapter->adapt($value, $type);
-    }
-    catch(Exception $e) {
-        // ignore invalid fields
-        unset($values[$field]);
-    }
-}
-// adapt fields in changes array
-foreach($changes as $field => $value) {
-    $type = $schema[$field]['type'];
-    if($type == 'computed') {
-        $type = $schema[$field]['result_type'];
-    }
-    try {
-        // adapt received values based on their type (as defined in schema)
-        $changes[$field] = $adapter->adapt($value, $type);
-    }
-    catch(Exception $e) {
-        $msg = $e->getMessage();
-        // handle serialized objects as message
-        $data = @unserialize($msg);
-        if ($data !== false) {
-            $msg = $data;
+    // adapt fields in $values array
+    foreach($values as $field => $value) {
+        try {
+            $f = $model->getField($field);
+            // adapt received values based on their type (as defined in schema)
+            $values[$field] = $adapter->adaptIn($value, $f->getUsage());
         }
-        throw new \Exception(serialize([$field => $msg]), $e->getCode());
-    }        
-}
-
-
-$result = $model::onchange($orm, $changes, $values, $params['lang']);
-
-// adapt resulting values to json
-foreach($result as $field => $value) {
-    $type = $schema[$field]['type'];
-    if($type == 'computed') {
-        $type = $schema[$field]['result_type'];
+        catch(Exception $e) {
+            // ignore invalid fields
+            unset($values[$field]);
+        }
     }
-    // adapt received values based on their type (as defined in schema)
-    $result[$field] = $adapter->adapt($value, $type, 'txt', 'php');
+
+    // adapt fields in $changes array
+    foreach($changes as $field => $value) {
+        try {
+            $f = $model->getField($field);
+            // adapt received values based on their type (as defined in schema)
+            $changes[$field] = $adapter->adaptIn($value, $f->getUsage());
+        }
+        catch(Exception $e) {
+            $msg = $e->getMessage();
+            // handle serialized objects as message
+            $data = @unserialize($msg);
+            if ($data !== false) {
+                $msg = $data;
+            }
+            throw new Exception(serialize([$field => $msg]), $e->getCode());
+        }
+    }
+
+    // inject parameters based on the target method signature
+
+    /** @var ReflectionMethod */
+    $method = new ReflectionMethod($params['entity'], 'onchange');
+    /** @var ReflectionParameter */
+    $parameters = $method->getParameters();
+
+    $args = [];
+    foreach($parameters as $param) {
+        $param_name = $param->getName();
+        if(in_array($param_name, ['om', 'orm'])) {
+            $args[] = $orm;
+        }
+        elseif(in_array($param_name, ['changes', 'event'])) {
+            $args[] = $changes;
+        }
+        elseif($param_name == 'values') {
+            $args[] = $values;
+        }
+        elseif($param_name == 'lang') {
+            $args[] = $lang;
+        }
+        elseif($param_name == 'self') {
+            // #todo - should we add object id to the params ?
+            $factory = Collections::getInstance();
+            $c = $factory->create($params['entity']);
+            $c->lang($params['lang']);
+            $args[] = $c;
+        }
+    }
+
+    $result = $params['entity']::onchange(...$args);
+
+    // adapt resulting values to json
+    foreach($result as $field => $value) {
+        // leave array untouched (not an ORM type)
+        if(is_array($value)) {
+            continue;
+        }
+        // convert objects to arrays (for supporting values retrieved as sub-objects)
+        if(is_object($value)) {
+            if(is_subclass_of($value, 'equal\orm\Model')) {
+                $result[$field] = $value->toArray();
+            }
+            else {
+                $result[$field] = serialize($value);
+            }
+        }
+        else {
+            $f = $model->getField($field);
+            // adapt received values based on their type (as defined in schema)
+            $result[$field] = $adapter->adaptOut($value, $f->getUsage());
+        }
+    }
+
 }
 
 $context->httpResponse()
-        ->status(200)
         ->body($result)
         ->send();

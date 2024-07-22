@@ -1,10 +1,11 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
-    Some Rights Reserved, Cedric Francoys, 2010-2021
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
+    Some Rights Reserved, Cedric Francoys, 2010-2024
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
+
+list($params, $providers) = eQual::announce([
     'description'   => "Update (fully or partially) the given object.",
     'params'        => [
         'entity' =>  [
@@ -51,14 +52,18 @@ list($params, $providers) = announce([
 ]);
 
 /**
- * @var \equal\php\Context          $context
- * @var \equal\orm\ObjectManager    $orm
- * @var \equal\data\DataAdapter     $adapter
+ * @var \equal\php\Context               $context
+ * @var \equal\orm\ObjectManager         $orm
+ * @var \equal\data\DataAdapterProvider  $dap
  */
-list($context, $orm, $adapter) = [$providers['context'], $providers['orm'], $providers['adapt']];
+list($context, $orm, $dap) = [$providers['context'], $providers['orm'], $providers['adapt']];
+
+/** @var \equal\data\adapt\DataAdapter */
+$adapter = $dap->get('json');
+
 $result = [];
 
-if( empty($params['ids']) ) {
+if(empty($params['ids'])) {
     if( !isset($params['id']) || $params['id'] <= 0 ) {
         throw new Exception("object_invalid_id", QN_ERROR_INVALID_PARAM);
     }
@@ -70,27 +75,33 @@ if(!$model) {
     throw new Exception("unknown_entity", QN_ERROR_INVALID_PARAM);
 }
 
-// adapt received values for parameter 'fields' (which are still formated as text)
+// adapt received values for parameter 'fields' (which are still formatted as text)
 $schema = $model->getSchema();
+
 // remove unknown fields
 $fields = array_filter($params['fields'], function($field) use ($schema){
-    return isset($schema[$field]);
-}, ARRAY_FILTER_USE_KEY);
-
+            return isset($schema[$field]);
+        },
+        ARRAY_FILTER_USE_KEY
+    );
 
 foreach($fields as $field => $value) {
-    $type = $schema[$field]['type'];
-    // drop empty fields (allow reset to null)
-    if(!is_array($value) && !strlen(strval($value)) && !in_array($type, ['boolean', 'string', 'text']) && !is_null($value) ) {
+    $f = $model->getField($field);
+    $descriptor = $f->getDescriptor();
+    $type = $descriptor['result_type'];
+    // drop empty fields : non-string scalar fields with empty string as value are ignored (unless set to null)
+    if(!is_array($value) && !strlen(strval($value)) && !in_array($type, ['boolean', 'string', 'text']) && !is_null($value)) {
         unset($fields[$field]);
         continue;
     }
-    if($type == 'computed') {
-        $type = $schema[$field]['result_type'];
+    // empty strings are considered equivalent to null
+    if(in_array($type, ['string', 'text']) && !strlen(strval($value))) {
+        $fields[$field] = null;
+        continue;
     }
     try {
         // adapt received values based on their type (as defined in schema)
-        $fields[$field] = $adapter->adapt($value, $type);
+        $fields[$field] = $adapter->adaptIn($value, $f->getUsage());
     }
     catch(Exception $e) {
         $msg = $e->getMessage();
@@ -105,8 +116,8 @@ foreach($fields as $field => $value) {
 
 
 if(count($fields)) {
-    // we're updating a single object: enforce Optimistic Concurrency Control (https://en.wikipedia.org/wiki/Optimistic_concurrency_control)
-    if( count($params['ids']) == 1) {
+    // when updating a single object, enforce Optimistic Concurrency Control (https://en.wikipedia.org/wiki/Optimistic_concurrency_control)
+    if(count($params['ids']) == 1) {
         // handle draft edition
         if(isset($fields['state']) && $fields['state'] == 'draft') {
             $object = $params['entity']::ids($params['ids'])->read(['state'])->first(true);
@@ -114,17 +125,17 @@ if(count($fields)) {
             if($object['state'] != 'draft') {
                 // create object as draft to avoid a missing_mandatory error, and then update it
                 $instance = $params['entity']::create(['state' => 'draft'])
-                                             ->update($fields, $params['lang'])
-                                             ->read(['id'])
-                                             ->adapt('txt')
-                                             ->first(true);
+                    ->update($fields, $params['lang'])
+                    ->read(['id'])
+                    ->adapt('json')
+                    ->first(true);
                 $params['ids'] = [$instance['id']];
             }
         }
         // handle instances edition
-        else if(isset($fields['modified']) ) {
+        elseif(isset($fields['modified']) ) {
             $object = $params['entity']::ids($params['ids'])->read(['modified'])->first(true);
-            // a changed occured in the meantime
+            // a changed occurred in the meantime
             if($object['modified'] != $fields['modified'] && !$params['force']) {
                 throw new Exception("concurrent_change", QN_ERROR_CONFLICT_OBJECT);
             }
@@ -132,14 +143,14 @@ if(count($fields)) {
     }
 
     $result = $params['entity']::ids($params['ids'])
-                            // update with received values (with validation - submit `state` if received)
-                            ->update($fields, $params['lang'])
-                            ->read(['id', 'state', 'name', 'modified'])
-                            ->adapt('txt')
-                            ->get(true);
+        // update with received values (with validation - submit `state` if received)
+        ->update($fields, $params['lang'])
+        ->read(['id', 'state', 'name', 'modified'])
+        ->adapt('json')
+        ->get(true);
 }
 
 $context->httpResponse()
-        ->status(200)
-        ->body($result)
-        ->send();
+    ->status(200)
+    ->body($result)
+    ->send();

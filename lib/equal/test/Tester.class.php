@@ -23,9 +23,9 @@ class Tester {
 
     public function toArray() {
         $result = [
-            'result'        => 'ok',
+            'log'           => $this->results,
             'count_test'    => count($this->tests),
-            'log'           => $this->results
+            'result'        => 'ok',
         ];
         // if something went wrong, append details
         if(count($this->failing)) {
@@ -78,7 +78,6 @@ class Tester {
             $args = [];
             $result = null;
             $success = true;
-            $start = time();
 
             if(isset($test['arrange']) && is_callable($test['arrange'])) {
                 try {
@@ -87,7 +86,7 @@ class Tester {
                 }
                 catch(\Exception $e) {
                     $this->results[$id]['logs'][] = "Error while performing `arrange()`: ".$e->getMessage();
-                    throw new \Exception("test {$id} raised an unexpected exception", QN_ERROR_UNKNOWN);
+                    throw new \Exception("test {$id} raised an unexpected exception: ".$e->getMessage(), QN_ERROR_UNKNOWN);
                 }
             }
 
@@ -148,56 +147,27 @@ class Tester {
                 $this->failing[] = $id;
             }
 
-            if(isset($test['rollback'])) {
-                if(is_callable($test['rollback'])) {
-                    try {
-                        $test['rollback']();
-                    }
-                    catch(\Exception $e) {
-                        $this->results[$id]['logs'][] = "Error while performing `rollback()`: ".$e->getMessage();
-                    }
+            if(isset($test['rollback']) && is_callable($test['rollback'])) {
+                try {
+                    call_user_func_array($test['rollback'], [$result]);
                 }
-                elseif($test['rollback'] == 'auto') {
-                    try {
-                        $provider = \eQual::inject(['orm']);
-
-                        /** @var \equal\orm\ObjectManager $orm */
-                        $orm = $provider['orm'];
-
-                        $log_ids = $orm->search('core\Log', ['created', '>=', $start]);
-                        $logs = $orm->read('core\Log', $log_ids, ['action', 'object_class', 'object_id']);
-
-                        $map_object_to_delete = [];
-                        foreach($logs as $log) {
-                            if($log['action'] != 'create') {
-                                continue;
-                            }
-                            if(!isset($map_object_to_delete[$log['object_class']])) {
-                                $map_object_to_delete[$log['object_class']] = [];
-                            }
-                            $map_object_to_delete[$log['object_class']][] = $log['object_id'];
-                        }
-
-                        foreach($map_object_to_delete as $class => $ids) {
-                            $orm->delete($class, $ids, true);
-                        }
-
-                        $orm->delete('core\Log', $log_ids, true);
-                    } catch(\Exception $e) {
-                        $this->results[$id]['logs'][] = "Error while performing auto `rollback`: ".$e->getMessage();
-                    }
+                catch(\Exception $e) {
+                    $this->results[$id]['logs'][] = "Error while performing `rollback()`: ".$e->getMessage();
                 }
             }
 
             $this->results[$id]['status'] = $success?'ok':'ko';
-            $this->results[$id]['result'] = (gettype($result) == 'object')?'(object)':$result;
+            if(gettype($result) == 'object') {
+                $result = get_class($result).' object:'.json_encode($result);
+            }
+            $this->results[$id]['result'] = $result;
 
             if(isset($test['expected'])) {
                 $this->results[$id]['expected'] = $test['expected'];
             }
 
             if(isset($test['arrange'])) {
-                $this->results[$id]['arrange'] = (gettype($precondition) == 'object')?'(object)':$precondition;
+                $this->results[$id]['arrange'] = (gettype($precondition) == 'object')?'('.get_class($precondition).' object)':$precondition;
             }
         }
 

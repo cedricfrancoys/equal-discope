@@ -7,12 +7,13 @@
 use core\User;
 
 list($params, $providers) = announce([
-    'description'   => 'Grant additional privilege to given user.',
+    'description'   => 'Retrieve current permission that a user has on a given entity.',
     'response'      => [
         'content-type'  => 'application/json',
         'charset'       => 'UTF-8',
         'accept-origin' => '*'
     ],
+    'constants'     => ['DEFAULT_RIGHTS'],
     'params'        => [
         'user' =>  [
             'description'   => 'login (email address) or ID of targeted user.',
@@ -25,12 +26,29 @@ list($params, $providers) = announce([
             'default'       => '*'
         ]
     ],
-    'providers'     => ['context', 'auth', 'access', 'orm']
+    'providers'     => ['context', 'access']
 ]);
 
-list($context, $orm, $am, $ac) = [ $providers['context'], $providers['orm'], $providers['auth'], $providers['access'] ];
+list($context, $access) = [ $providers['context'], $providers['access'] ];
 
+// retrieve targeted user
+if(is_numeric($params['user'])) {
+    $ids = User::search(['id', '=', $params['user']])->ids();
+}
+else {
+    // retrieve by login
+    $ids = User::search(['login', '=', $params['user']])->ids();
+}
 
+if(!count($ids)) {
+    throw new Exception("unknown_user", QN_ERROR_UNKNOWN_OBJECT);
+}
+
+$user_id = array_shift($ids);
+$rights = $access->getUserRights($user_id, $params['entity']);
+
+// convert ACL value to human string
+$rights_txt = [];
 $operations = [
     QN_R_CREATE => 'create',
     QN_R_READ   => 'read',
@@ -39,34 +57,20 @@ $operations = [
     QN_R_MANAGE => 'manage'
 ];
 
-// retrieve targeted user
-if(is_numeric($params['user'])) {
-    $ids = User::search(['id', '=', $params['user']])->ids();
-    if(!count($ids)) {
-        throw new \Exception("unknown_user_id", QN_ERROR_UNKNOWN_OBJECT);
-    }
-}
-else {
-    // retrieve by login
-    $ids = User::search(['login', '=', $params['user']])->ids();
-    if(!count($ids)) {
-        throw new \Exception("unknown_username", QN_ERROR_UNKNOWN_OBJECT);
-    }
-}
-
-$user_id = array_shift($ids);
-
-$rights = $ac->rights($user_id, $params['entity']);
-
-$rights_txt = [];
-
-foreach($operations as $id => $name) {
-    if($rights & $id) {
+foreach($operations as $op => $name) {
+    if($rights & $op) {
         $rights_txt[] = $name;
     }
 }
 
+$result = [
+    'user_id'       => $user_id,
+    'entity'        => $params['entity'],
+    'rights'        => $rights,
+    'rights_txt'    => $rights_txt
+];
+
 $context->httpResponse()
         ->status(200)
-        ->body(['result' => implode(', ', $rights_txt)])
+        ->body($result)
         ->send();

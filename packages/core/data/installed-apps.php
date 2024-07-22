@@ -4,9 +4,11 @@
     Some Rights Reserved, Cedric Francoys, 2010-2021
     Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 */
-list($params, $providers) = announce([
+list($params, $providers) = eQual::announce([
     'description'   => "Returns a map with the descriptors of the installed apps (depending on initialized packages).",
-    'params'        => [
+    'deprecated'    => true,
+    'access'        => [
+        'visibility'    => 'protected'
     ],
     'response'      => [
         'content-type'  => 'application/json',
@@ -22,17 +24,9 @@ list($params, $providers) = announce([
  */
 list($context, $orm) = [$providers['context'], $providers['orm']];
 
-$manifests_map = [];
-
-// search and read manifest.json inside App folders within /public
-foreach(glob("public/*", GLOB_ONLYDIR) as $app_path) {
-    if(file_exists("$app_path/manifest.json")) {
-        if($manifest = json_decode(file_get_contents("$app_path/manifest.json"), true)) {
-            $manifests_map[basename($app_path)] = $manifest;
-        }
-    }
-}
+// #deprecated - scripts should make direct calls to core_config_live_packages
+$result = eQual::run('get', 'core_config_live_apps');
 
 $context->httpResponse()
-    ->body($manifests_map)
+    ->body($result)
     ->send();

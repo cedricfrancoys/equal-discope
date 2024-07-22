@@ -9,23 +9,9 @@ namespace equal\http;
 
 class HttpHeaders {
 
-    protected static $MIME_TYPES = [
-        'MIME_HTML'  => ['text/html', 'application/xhtml+xml'],
-        'MIME_TXT'   => ['text/plain'],
-        'MIME_JS'    => ['application/javascript', 'application/x-javascript', 'text/javascript'],
-        'MIME_CSS'   => ['text/css'],
-        'MIME_JSON'  => ['application/json', 'application/vnd.api+json', 'application/x-json'],
-        'MIME_XML'   => ['text/xml', 'application/xml', 'application/x-xml'],
-        'MIME_RDF'   => ['application/rdf+xml'],
-        'MIME_ATOM'  => ['application/atom+xml'],
-        'MIME_RSS'   => ['application/rss+xml'],
-        'MIME_FORM'  => ['application/x-www-form-urlencoded'],
-        'MIME_PDF'   => ['application/pdf'],
-        'MIME_JPEG'  => ['image/jpeg']
-    ];
-
     // map of headers
     private $headers;
+
     // map for cookies extra data (for HttpResponse)
     private $cookies_params;
 
@@ -55,8 +41,8 @@ class HttpHeaders {
     public function setCookie($cookie, $value, $params=null) {
         $cookies = $this->getCookies();
         $cookies[$cookie] = $value;
-        $rawcookie_parts = array_map(function ($cookie, $value) { return "$cookie=$value"; }, array_keys($cookies), $cookies);
-        $this->set('Cookie', implode('; ', $rawcookie_parts));
+        $cookie_parts = array_map(function ($cookie, $value) { return "$cookie=$value"; }, array_keys($cookies), $cookies);
+        $this->set('Cookie', implode('; ', $cookie_parts));
         if($params) {
             $this->cookies_params[$cookie] = $params;
         }
@@ -65,21 +51,40 @@ class HttpHeaders {
 
     public function setCharset($charset) {
         if(isset($this->headers['Accept-Charset'])) {
-            return $this->set('Accept-Charset', $charset);
+            $this->set('Accept-Charset', $charset);
         }
         else {
+            static $map_charset_allowed = [
+                    'text/html'                 => true,
+                    'text/plain'                => true,
+                    'text/css'                  => true,
+                    'application/json'          => true,
+                    'application/javascript'    => true,
+                    'application/xml'           => true,
+                    'application/xhtml+xml'     => true
+                ];
+
             $content_type = $this->getContentType();
-            return $this->set('Content-Type', $content_type.'; charset='.strtoupper($charset));
+            if(isset($map_charset_allowed[$content_type])) {
+                $this->set('Content-Type', $content_type.'; charset='.strtoupper($charset));
+            }
         }
+        return $this;
     }
 
     public function setContentType($content_type) {
+        // the header is part of a Request
         if(isset($this->headers['Accept'])) {
             return $this->set('Accept', $content_type);
         }
+        // the header is part of a Response
         else {
+            $value = $content_type;
             $charset = $this->getCharset();
-            return $this->set('Content-Type', $content_type.'; charset='.$charset);
+            if(strlen($charset)) {
+                $value .= '; charset='.$charset;
+            }
+            return $this->set('Content-Type', $value);
         }
     }
 
@@ -97,10 +102,14 @@ class HttpHeaders {
      */
     public function get($header, $default=null) {
         $res = $default;
-        if(isset($this->headers[$header])) $res = $this->headers[$header];
+        if(isset($this->headers[$header])) {
+            $res = $this->headers[$header];
+        }
         else {
-            $normaliazed_header = self::normalizeName($header);
-            if(isset($this->headers[$normaliazed_header])) $res = $this->headers[$normaliazed_header];
+            $normalized_header = self::normalizeName($header);
+            if(isset($this->headers[$normalized_header])) {
+                $res = $this->headers[$normalized_header];
+            }
         }
         return $res;
     }
@@ -141,19 +150,18 @@ class HttpHeaders {
         return $default;
     }
 
-// todo: make explicit distinction between charset used in the message and expected charset in response
-
+    // #todo: make explicit distinction between charset used in the message and expected charset in response
     public function getCharsets()  {
         $charsets = [];
         if(isset($this->headers['Accept-Charset'])) {
-            // general syntax: character_set [q=qvalue]
+            // general syntax: character_set [q=value]
             // example: Accept-Charset: iso-8859-5, unicode-1-1; q=0.8
             $parts = explode(',', $this->headers['Accept-Charset']);
             if(count($parts)) {
                 $charsets = array_map(function($a) { return trim(explode(';', $a)[0]); }, $parts);
             }
         }
-        else if(isset($this->headers['Content-Type'])) {
+        elseif(isset($this->headers['Content-Type'])) {
             // general syntax: media-type
             // example: Content-Type: text/html; charset=ISO-8859-4
             $parts = explode(';', $this->headers['Content-Type']);
@@ -164,29 +172,31 @@ class HttpHeaders {
                 }
             }
         }
-        if(empty($charsets)) {
-            $charsets = (array) 'UTF-8';
-        }
         return $charsets;
     }
 
-    // preferred charset
+    /**
+     * Return the charset currently set in the header, if any.
+     *
+     */
     public function getCharset() {
         $charsets = $this->getCharsets();
-        return $charsets[0];
+        return count($charsets)?$charsets[0]:'';
     }
 
     public function getLanguages()  {
         $languages = (array) 'en';
         if(isset($this->headers['Accept-Language'])) {
-            // general syntax: language [q=qvalue]
+            // general syntax: language [q=value]
             // example: Accept-Language: da, en-gb;q=0.8, en;q=0.7
             $matches = [];
-            if( preg_match_all("/([^-;]*)(?:-([^;]*))?(?:;q=([0-9]\.[0-9]))?/", $this->headers['Accept-Language'], $matches)) {
+            if(preg_match_all("/([^-;]*)(?:-([^;]*))?(?:;q=([0-9]\.[0-9]))?/", $this->headers['Accept-Language'], $matches)) {
                 if(count($matches)) {
                     $languages = [];
                     foreach($matches[0] as $factor) {
-                        if(!strlen($factor)) continue;
+                        if(!strlen($factor)) {
+                            continue;
+                        }
                         $parts = explode(';q=', $factor);
                         $lang_descr = explode(',', trim($parts[0], ','));
                         foreach($lang_descr as $lang) {
@@ -216,61 +226,56 @@ class HttpHeaders {
 
 
     /**
-     * Returns the client IP addresses.
+     * Returns the IP addresses of the HTTP message.
+     * List contains original IP (for) and, if set, a series of IP of used proxies that passed the request.
      *
-     * List is based on proxies order set in the header.
-     *
-     *
-     * @return array The client IP addresses
+     * @return array The IP addresses of the HTTP message.
      *
      * @see getIpAddress()
      */
     private function getIpAddresses() {
-        $client_ips = array();
+        $ip_addresses = [];
 
-        if (isset($this->headers['Forwarded'])) {
-            preg_match_all('{(for)=("?\[?)([a-z0-9\.:_\-/]*)}', $this->headers['X-Forwarded-For'], $matches);
-            $client_ips = $matches[3];
+        if(isset($this->headers['Forwarded'])) {
+            preg_match_all('/(for)=("?\[?)([a-z0-9\.:_\-\/]*)/', $this->headers['Forwarded'], $matches);
+            foreach($matches as $match) {
+                $ip_addresses[] = $match[3];
+            }
+            preg_match_all('/(by)=("?\[?)([a-z0-9\.:_\-\/]*)/', $this->headers['Forwarded'], $matches);
+            foreach($matches as $match) {
+                $ip_addresses[] = $match[3];
+            }
         }
-        elseif (isset($this->headers['X-Forwarded-For'])) {
-            $client_ips = array_map('trim', explode(',', $this->headers['X-Forwarded-For']));
+        elseif(isset($this->headers['X-Forwarded-For'])) {
+            $ip_addresses = array_map('trim', explode(',', $this->headers['X-Forwarded-For']));
         }
 
-        foreach ($client_ips as $key => $client_ip) {
+        foreach($ip_addresses as $key => $client_ip) {
             // remove port, if any
             if (preg_match('{((?:\d+\.){3}\d+)\:\d+}', $client_ip, $match)) {
-                $client_ips[$key] = $client_ip = $match[1];
+                $ip_addresses[$key] = $match[1];
             }
-            // remove invalid adresses
-            if (!filter_var($client_ip, FILTER_VALIDATE_IP)) {
-                unset($client_ips[$key]);
+            // remove invalid addresses
+            if (!filter_var($ip_addresses[$key], FILTER_VALIDATE_IP)) {
+                unset($ip_addresses[$key]);
                 continue;
             }
         }
 
-        // the IP chain contains only untrusted proxies and the client IP
-        return array_reverse($client_ips) ;
+        return $ip_addresses;
     }
 
     /**
-     * Returns the client IP address.
+     * Returns the original client IP address.
      *
-     * This method can read the client IP address from the "X-Forwarded-For" header
-     * when trusted proxies were set via "setTrustedProxies()". The "X-Forwarded-For"
-     * header value is a comma+space separated list of IP addresses, the left-most
-     * being the original client, and each successive proxy that passed the request
-     * adding the IP address where it received the request from.
+     * @return string The IP address of the client from which the message originates.
      *
-     * @return string The client IP address
-     *
-     * @see getIpAddresses()
      * @see http://en.wikipedia.org/wiki/X-Forwarded-For
      */
     public function getIpAddress() {
-        $ipAddresses = $this->getIpAddresses();
-        return (count($ipAddresses))?$ipAddresses[0]:'';
+        $ip_addresses = $this->getIpAddresses();
+        return count($ip_addresses) ? $ip_addresses[0] : '127.0.0.1';
     }
-
 
     /**
      * Gets the format associated with the request.
@@ -303,15 +308,15 @@ class HttpHeaders {
      * Dominant rule consists of separate words with a dash (-), and write words lowercase using a capital letter for first character
      * But some commonly used names do not comply with this rule Content-MD5, ETag, P3P, DNT, X-ATT-DeviceId, ...
      * Besides, user might define some custom header and expect to retrieve them unaltered
-
+     *
      * List of official and common non-standards fields from Wikipedia
      * @link https://en.wikipedia.org/wiki/List_of_HTTP_header_fields
      */
     public static function normalizeName($name) {
-        static $fields = null;
+        static $map_types = null;
 
-        if(is_null($fields)) {
-            $fields = [
+        if(is_null($map_types)) {
+            $map_types = [
                 'accept'                        => 'Accept',
                 'acceptcharset'                 => 'Accept-Charset',
                 'acceptdatetime'                => 'Accept-Datetime',
@@ -419,8 +424,8 @@ class HttpHeaders {
         // set name to lowercase and strip dashes
         $key = str_replace('-', '', strtolower($name));
         // look for a match
-        if(isset($fields[$key])) {
-            $res = $fields[$key];
+        if(isset($map_types[$key])) {
+            $res = $map_types[$key];
         }
         return $res;
     }

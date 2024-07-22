@@ -54,7 +54,7 @@
                                                 "width": "100%",
                                                 "widget": {
                                                     "type": "text",
-                                                    "height": 600
+                                                    "height": 100
                                                 }
                                             }
                                         ]
@@ -97,7 +97,22 @@
                                                 "type": "field",
                                                 "value": "users_ids",
                                                 "width": "100%",
-                                                "label": "Users"
+                                                "label": "Users",
+                                                "widget": {
+                                                    "header": {
+                                                        "actions": {
+                                                            "ACTION.SELECT": true,
+                                                            "ACTION.CREATE": true
+                                                        },
+                                                        "actions_sample": {
+                                                            "ACTION.SELECT": false,
+                                                            "ACTION.CREATE": false
+                                                        },
+                                                        "selection_sample": {
+                                                            "default": false
+                                                        }
+                                                    }
+                                                }
                                             }
                                         ]
                                     }

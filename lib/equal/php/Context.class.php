@@ -18,8 +18,6 @@ class Context extends Service {
 
     private $pid;
 
-    private $time;
-
     private $httpRequest;
 
     private $httpResponse;
@@ -31,23 +29,24 @@ class Context extends Service {
      */
     protected function __construct() {
         $this->params = [];
-        // get PID from HTTP server / PHP cli
+        // get PID from HTTP server / PHP cli (all contexts from a same thread have the same pid)
         $this->pid = getmypid();
-        // get current unix time in microseconds
-        $this->time = microtime();
         $this->httpRequest = null;
         $this->httpResponse = null;
     }
 
     public function __clone() {
-        if($this->httpRequest)  $this->httpRequest = clone $this->httpRequest;
-        if($this->httpResponse) $this->httpResponse = clone $this->httpResponse;
+        if($this->httpRequest) {
+            $this->httpRequest = clone $this->httpRequest;
+        }
+        if($this->httpResponse) {
+            $this->httpResponse = clone $this->httpResponse;
+        }
     }
 
     public function __toString() {
-        return 'This is the PHP context instance';
+        return 'This is the PHP context instance.';
     }
-
 
     public function get($var, $default=null) {
         if(isset($this->params[$var])) {
@@ -59,10 +58,6 @@ class Context extends Service {
     public function set($var, $value) {
         $this->params[$var] = $value;
         return $this;
-    }
-
-    public function getTime() {
-        return $this->time;
     }
 
     public function getPid() {
@@ -106,16 +101,9 @@ class Context extends Service {
         return $this;
     }
 
-    // below are additional method using short name and get/set based on arguments
-
-    public function httpRequestMethod() {
-        return $this->getHttpMethod();
-    }
-
-    public function httpRequestHeaders() {
-        return $this->getHttpRequestHeaders();
-    }
-
+    /**
+     * Shorthand for getHttpRequest/setHttpRequest, acting as getter/setter based on arguments
+     */
     public function httpRequest() {
         $args = func_get_args();
         if(count($args) < 1) {
@@ -127,6 +115,9 @@ class Context extends Service {
         }
     }
 
+    /**
+     * Shorthand for getHttpResponse/setHttpResponse, acting as getter/setter based on arguments
+     */
     public function httpResponse() {
         $args = func_get_args();
         if(count($args) < 1) {
@@ -138,27 +129,17 @@ class Context extends Service {
         }
     }
 
-    // private methods
 
-
+    /**
+     * Return the list of headers that have been set and that will be part of the HTTP Response.
+     * #todo - there might be several headers having the same name (ex. Link), using a map prevents supporting that case
+     */
     private function getHttpResponseHeaders() {
         $res = [];
         $headers = headers_list();
         foreach($headers as $header) {
             list($name, $value) = explode(':', $header, 2);
-            $res[$name] = trim($value);
-        }
-        $request_headers = $this->getHttpRequestHeaders();
-        // set default content type to JSON and default charset to UTF-8
-        $res['Content-Type'] = 'application/json; charset=UTF-8';
-        if(isset($request_headers['Accept'])) {
-            // example: Accept: text/plain; q=0.5, text/html, text/x-dvi; q=0.8, text/x-c
-            $parts = explode(',', $request_headers['Accept']);
-            $parts = explode(';', $parts[0]);
-            $content_type = trim($parts[0]);
-            if(strpos($request_headers['Accept'], '*/*') === false) {
-                $res['Content-Type'] = $content_type;
-            }
+            $res[HttpHeaders::normalizeName($name)] = trim($value);
         }
         return $res;
     }
@@ -215,14 +196,14 @@ class Context extends Service {
             // 1) retrieve headers
 
             $headers = [];
-            if (function_exists('getallheaders')) {
+            if(function_exists('getallheaders')) {
                 $all_headers = (array) getallheaders();
                 foreach($all_headers as $header => $value) {
                     $headers[HttpHeaders::normalizeName($header)] = $value;
                 }
             }
             else {
-                foreach ($_SERVER as $header => $value) {
+                foreach($_SERVER as $header => $value) {
                     // convert back headers with `HTTP_` prefix
                     if(substr($header, 0, 5) === 'HTTP_' || in_array($header, ['CONTENT_TYPE', 'CONTENT_LENGTH', 'CONTENT_MD5'])) {
                         $header = str_replace(['HTTP_', '_'], '', $header);
@@ -243,52 +224,40 @@ class Context extends Service {
                 }
             }
             // handle Authorization header
-            if (!isset($headers['Authorization'])) {
-                if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            if(!isset($headers['Authorization'])) {
+                if(isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
                     $headers['Authorization'] = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
                 }
-                elseif (isset($_SERVER['PHP_AUTH_USER'])) {
-                    $basic_pass = isset($_SERVER['PHP_AUTH_PW']) ? $_SERVER['PHP_AUTH_PW'] : '';
+                elseif(isset($_SERVER['PHP_AUTH_USER'])) {
+                    $basic_pass = $_SERVER['PHP_AUTH_PW'] ?? '';
                     $headers['Authorization'] = 'Basic ' . base64_encode($_SERVER['PHP_AUTH_USER'] . ':' . $basic_pass);
                 }
-                elseif (isset($_SERVER['PHP_AUTH_DIGEST'])) {
+                elseif(isset($_SERVER['PHP_AUTH_DIGEST'])) {
                     $headers['Authorization'] = $_SERVER['PHP_AUTH_DIGEST'];
                 }
             }
             // handle ETags
             if(!isset($headers['ETag'])) {
-                if(isset($headers['If-None-Match'])) {
-                    $headers['ETag'] = $headers['If-None-Match'];
-                }
-                else {
-                    $headers['ETag'] = '';
-                }
+                $headers['ETag'] = $headers['If-None-Match'] ?? '';
             }
-            // handle client's IP address : we make sure that 'X-Forwarded-For' is always set with the most probable client IP
-            // fallback to localhost (using CLI, REMOTE_ADDR is not set), so we default to '127.0.0.1'
-            $client_ip = '127.0.0.1';
+            // handle client IP address
+            // use only REMOTE_ADDR, if present (to prevent spoofing) - fallback to localhost
+            $headers['X-Forwarded-For'] = '127.0.0.1';
+            // #memo - using CLI, REMOTE_ADDR is not set
             if(isset($_SERVER['REMOTE_ADDR'])) {
-                $client_ip = $_SERVER['REMOTE_ADDR'];
-            }
-            if(!isset($headers['X-Forwarded-For'])) {
-                $headers['X-Forwarded-For'] = $client_ip;
-            }
-            // assign X-Forwarded-For with a single IP (first in list)
-            $headers['X-Forwarded-For'] = stristr($headers['X-Forwarded-For'],',') ? stristr($headers['X-Forwarded-For'],',',true) : $headers['X-Forwarded-For'];
-        }
-        if(isset($headers['content-type'])) {
-            $headers['Content-Type'] = $headers['content-type'];
-        }
-        // adapt Content-Type for multipart/form-data (already parsed by PHP)
-        if(isset($headers['Content-Type'])) {
-            if($this->getHttpMethod() == 'POST' && strpos($headers['Content-Type'], 'multipart/form-data') === 0) {
-                $headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                $headers['X-Forwarded-For'] = $_SERVER['REMOTE_ADDR'];
             }
         }
-        else {
-            // will be parsed using parse_str
+
+        // set default content type to 'application/x-www-form-urlencoded'
+        if(!isset($headers['Content-Type'])) {
             $headers['Content-Type'] = 'application/x-www-form-urlencoded';
         }
+        // adapt Content-Type for multipart/form-data (already parsed by PHP)
+        elseif($this->getHttpMethod() == 'POST' && strpos($headers['Content-Type'], 'multipart/form-data') === 0) {
+            $headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        }
+
         return $headers;
     }
 
@@ -303,6 +272,9 @@ class Context extends Service {
             $auth .= '@';
         }
         $host = isset($_SERVER['HTTP_HOST'])?$_SERVER['HTTP_HOST']:'localhost';
+        // make sure host does not contain a port number (strip if any)
+        $host = substr($host.':', 0, strpos($host.':', ':'));
+
         $port = isset($_SERVER['SERVER_PORT'])?$_SERVER['SERVER_PORT']:80;
         // fallback to current script name (using CLI, REQUEST_URI is not set), i.e. '/index.php'
         $uri = '/'.$_SERVER['SCRIPT_NAME'];
@@ -382,23 +354,50 @@ class Context extends Service {
         return intval($val);
     }
 
+    /**
+     * #todo - we should provide a way to define content-type for CLI context
+     * ex.: --content_type=json
+     */
     private function getHttpBody() {
         $body = '';
+
+        // #memo - stream `php://input` might contain more data than available memory
+        $max_req = min(self::to_bytes(ini_get('upload_max_filesize')), self::to_bytes(ini_get('post_max_size')));
+        $max_mem = max(0, self::to_bytes(ini_get('memory_limit')) - memory_get_usage(true));
+        // #memo - we need to be able to continue the processing (vars will be adapted/copied), so we limit the input to 40% of remaining memory
+        $max_mem = (int) ($max_mem * 0.4);
+
+        // prevent consuming the stdin if 'i' arg is present ("ignore stdin auto-feed")
+        $options = getopt('i::');
+
         // CLI: script was invoked on command line interface
-        if(php_sapi_name() === 'cli' || defined('STDIN')) {
+        if((php_sapi_name() === 'cli' || defined('STDIN')) && !isset($options['i'])) {
             // Windows does not support non-blocking reading from STDIN
             $OS = strtoupper(substr(PHP_OS, 0, 3));
             $options = getopt('f::');
-            // so we disable auto-feed from stdin unless there is a 'f' args (to force it)
+            // #memo - non blocking is not supported under win64
+            // we disable auto-feed from stdin unless there is a 'f' args ("force using stdin")
             if ( $OS !== 'WIN' || isset($options['f'])) {
                 // fetch body from stdin
-                $body = '';
                 $stdin = fopen('php://stdin', "r");
-                $read  = array($stdin);
+                if(!stream_set_blocking($stdin, false)) {
+                    // throw new \Exception('stream_blocking_unavailable', QN_ERROR_UNKNOWN);
+                }
+
+                $read  = [$stdin];
                 $write = null;
                 $except = null;
-                if ( stream_select( $read, $write, $except, 0 ) === 1 ) {
-                    while ($line = fgets( $stdin )) {
+
+                $count = stream_select($read, $write, $except, 0, 1000);
+
+                if ($count !== false) {
+                    $length = 0;
+                    $chunk_size = 1024;
+                    while ($line = fgets($stdin, $chunk_size)) {
+                        $length += $chunk_size;
+                        if($length > $max_req || $length > $max_mem) {
+                            throw new \Exception('max_size_exceeded', QN_ERROR_INVALID_PARAM);
+                        }
                         $body .= $line;
                     }
                 }
@@ -407,21 +406,13 @@ class Context extends Service {
         // HTTP request: read raw content from input stream
         else {
             $headers = $this->getHttpRequestHeaders();
-            $body = '';
+
             if(isset($headers['Content-Length'])) {
                 $length = intval($headers['Content-Length']);
-                // #memo - stream `php://input` might contain more data than available memory
-                $max_req = min(self::to_bytes(ini_get('upload_max_filesize')), self::to_bytes(ini_get('post_max_size')));
-                $max_mem = max(0, self::to_bytes(ini_get('memory_limit')) - memory_get_usage(true));
-                // #memo - we need to be able to continue the processing (vars will be adapted/copied), so we limit the input to 40% of remaining memory
-                $max_mem = (int) ($max_mem * 0.4);
-                if($max_req <= 0 || $length > $max_req) {
-                    throw new \Exception("maximum_size_exceeded", QN_ERROR_NOT_ALLOWED);
-                }
                 if($length > 0) {
                     try {
-                        if($length > $max_mem) {
-                            throw new \Exception();
+                        if($length > $max_req || $length > $max_mem) {
+                            throw new \Exception("maximum_size_exceeded", QN_ERROR_NOT_ALLOWED);
                         }
                         $body = file_get_contents('php://input', false, null, 0, $length);
                     }
@@ -434,7 +425,7 @@ class Context extends Service {
         }
         // in some cases, PHP consumes the input to populate $_REQUEST and $_FILES (i.e. with multipart/form-data content-type)
         if(empty($body) || (is_string($body) && strlen($body) < 3) ) { // we could have received a formatted empty body (e.g.: {})
-            $uri  = $this->getHttpUri();
+            $uri = $this->getHttpUri();
             // for GET methods, PHP improperly fills $_GET and $_REQUEST with query string parameters
             // we allow this only when there's nothing from php://input
             if(isset($_FILES) && !empty($_FILES)) {
@@ -443,7 +434,7 @@ class Context extends Service {
             else {
                 $body = $_REQUEST;
             }
-            // mimic PHP behaviour: inject query string args to the body (only for args not already present in the body)
+            // mimic PHP behavior: inject query string args to the body (only for args not already present in the body)
             if(strlen($uri)) {
                 $parts = parse_url($uri);
                 if($parts != false && isset($parts['query'])) {

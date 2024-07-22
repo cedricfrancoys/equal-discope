@@ -9,12 +9,11 @@ namespace equal\orm\usages;
 
 class UsagePhone extends Usage {
 
-    public function getType(): string {
-        return 'phone';
-    }
-
-    public function getSqlType(): string {
-        return 'varchar(40)';
+    public function __construct(string $usage_str) {
+        parent::__construct($usage_str);
+        if($this->length == 0) {
+            $this->length = 17;
+        }
     }
 
     public function getConstraints(): array {
@@ -22,14 +21,10 @@ class UsagePhone extends Usage {
             'invalid_phone' => [
                 'message'   => 'String does not comply with usage constraint.',
                 'function'  =>  function($value) {
-                    return (bool) (preg_match('/^((\+[1-9]{2,3})|00)?[0-13]+$/', $value));
+                    return (bool) (preg_match('/^((\+[1-9]{2,3})|00|0)+([0-9]){1,13}$/', $value));
                 }
             ]
         ];
-    }
-
-    public function export($value, $lang='en'): string {
-        return $value;
     }
 
 }

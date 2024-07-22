@@ -1,18 +1,16 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
-    Some Rights Reserved, Cedric Francoys, 2010-2021
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
+    Some Rights Reserved, Cedric Francoys, 2010-2024
     Licensed under GNU GPL 3 license <http://www.gnu.org/licenses/>
 */
-use equal\db\DBConnection;
+use equal\db\DBConnector;
 
 // get listing of existing packages
-$json = run('get', 'config_packages');
-$packages = json_decode($json, true);
-
+$packages = eQual::run('get', 'config_packages');
 
 // announce script and fetch parameters values
-list($params, $providers) = announce([
+list($params, $providers) = eQual::announce([
     'description'	=>	"This script tests the given package and returns a report about found errors (if any).",
     'params' 		=>	[
         'package'	=>  [
@@ -33,46 +31,38 @@ list($params, $providers) = announce([
         'content-type'  => 'application/json',
         'charset'       => 'utf-8'
     ],
-    'providers'     => ['context', 'orm'],
-    'constants'     => ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_DBMS']
+    'providers'     => ['context', 'orm']
 ]);
 
+/**
+ * @var \equal\php\Context          $context
+ * @var \equal\orm\ObjectManager    $orm
+ */
 list($context, $orm) = [$providers['context'], $providers['orm']];
-
-$params['package'] = strtolower($params['package']);
 
 
 /*
+    #todo :
 
-TODO : check config and json files syntax.
+    * check config and json files syntax.
 
-translation files constraints:
-    * model helpers : max 45 chars
-    * error messages length : max 45 chars
+    * translation files constraints:
+        * model helpers : max 45 chars
+        * error messages length : max 45 chars
 
+    * for each view, check that each field is present 0 or 1 time
+    * for each view, check that the id match an entry in the translation file
+    * for each class, check that all fields are each field is present at least in one view
 
-* pour chaque vue, vérifier que chaque champ est renseigné zéro ou une seule fois
-* pour chaque vue, vérifier que les id ont une correspondance dans le fichier de traduction
-* pour chaque classe, vérifier que tous les champs sont définis au moins dans une view
-
+    * check for potential versions conflicts across packages in manifest `requires` (composer dependencies)
 */
-
-
 
 // result of the tests : array containing errors (if no errors are found, array is empty)
 $result = [];
 $is_error = false;
 
 // get classes listing
-$json = run('get', 'config_classes', ['package' => $params['package']]);
-$classes = json_decode($json, true);
-
-// relay error if any
-if(isset($classes['errors'])) {
-    foreach($classes['errors'] as $name => $message) {
-        throw new Exception($message, qn_error_code($name));
-    }
-}
+$classes = eQual::run('get', 'config_classes', ['package' => $params['package']]);
 
 
 /**
@@ -82,7 +72,7 @@ if(isset($classes['errors'])) {
 $lang_dir = "packages/{$params['package']}/i18n";
 $view_dir = "packages/{$params['package']}/views";
 
-$lang_list = array();
+$lang_list = [];
 if( is_dir($lang_dir) && ($list = scandir($lang_dir)) ) {
     foreach($list as $node) {
         if(is_dir($lang_dir.'/'.$node) && !in_array($node, array('.', '..'))) $lang_list[] = $node;
@@ -99,7 +89,7 @@ foreach($classes as $class) {
     $class_filename = str_replace('\\', '/', "packages/{$params['package']}/classes/{$class}".'.class.php');
     // check file existence
     if(!file_exists($class_filename)) {
-        throw new Exception("FATAL - class defintion file missing for '{$class_name}' ", QN_ERROR_UNKNOWN_OBJECT);
+        throw new Exception("FATAL - class definition file missing for '{$class_name}' ", QN_ERROR_UNKNOWN_OBJECT);
     }
 
     // check PHP syntax
@@ -114,42 +104,53 @@ foreach($classes as $class) {
         throw new Exception("FATAL - unknown class '{$class_name}'", QN_ERROR_UNKNOWN_OBJECT);
     }
 
+    // verify that the class actually inherits from Model
+    // retrieve root class (before Model)
+    $root_parent = get_parent_class($model);
+    while($root_parent && $root_parent != 'equal\orm\Model') {
+        $root_parent = get_parent_class($root_parent);
+    }
+
+    if(!$root_parent ) {
+        throw new Exception("FATAL - ORM - Class $class_name does not inherit from `equal\orm\Model` root class.", QN_ERROR_UNKNOWN_OBJECT);
+    }
+
     // get the complete schema of the object (including special fields)
     $schema = $model->getSchema();
 
-    // 1) check fields descriptions consistency
+    // 1) check fields descriptors consistency
 
     $valid_types = array_merge($orm::$virtual_types, $orm::$simple_types, $orm::$complex_types);
 
     // #toto - fields involved in unique constraint should be set as required
 
-    foreach($schema as $field => $description) {
-        if(!isset($description['type'])) {
+    foreach($schema as $field => $descriptor) {
+        if(!isset($descriptor['type'])) {
             $result[] = "ERROR - ORM - Class $class: Missing 'type' attribute for field $field ($class_filename)";
             $is_error = true;
             continue;
         }
-        if(!in_array($description['type'], $valid_types)) {
-            $result[] = "ERROR - ORM - Class $class: Invalid type '{$description['type']}' for field $field ($class_filename)";
+        if(!in_array($descriptor['type'], $valid_types)) {
+            $result[] = "ERROR - ORM - Class $class: Invalid type '{$descriptor['type']}' for field $field ($class_filename)";
             $is_error = true;
             continue;
         }
         if(!$orm::checkFieldAttributes($orm::$mandatory_attributes, $schema, $field)) {
-            $result[] = "ERROR - ORM - Class $class: Missing at least one mandatory attribute for field '$field' ({$description['type']}) - mandatory attributes are : ".implode(', ', $orm::$mandatory_attributes[$description['type']])." ($class_filename)";
+            $result[] = "ERROR - ORM - Class $class: Missing at least one mandatory attribute for field '$field' ({$descriptor['type']}) - mandatory attributes are : ".implode(', ', $orm::$mandatory_attributes[$descriptor['type']])." ($class_filename)";
             $is_error = true;
             continue;
         }
-        foreach($description as $attribute => $value) {
-            if(!in_array($attribute, $orm::$valid_attributes[$description['type']])) {
-                $result[] = "ERROR - ORM - Class $class: Unknown attribute '$attribute' for field '$field' ({$description['type']}) - Possible attributes are : ".implode(', ', $orm::$valid_attributes[$description['type']])." ($class_filename)";
+        foreach($descriptor as $attribute => $value) {
+            if(!in_array($attribute, $orm::$valid_attributes[$descriptor['type']])) {
+                $result[] = "ERROR - ORM - Class $class: Unknown attribute '$attribute' for field '$field' ({$descriptor['type']}) - Possible attributes are : ".implode(', ', $orm::$valid_attributes[$descriptor['type']])." ($class_filename)";
                 $is_error = true;
             }
-            if(in_array($attribute, array('store', 'multilang', 'search')) && $value !== true && $value !== false) {
-                $result[] = "ERROR - ORM - Class $class: Incompatible value for attribute $attribute in field $field of type {$description['type']} (possible attributes are : true, false)"." ($class_filename)";
+            if(in_array($attribute, array('store', 'multilang', 'readonly')) && $value !== true && $value !== false) {
+                $result[] = "ERROR - ORM - Class $class: Incompatible value for attribute $attribute in field $field of type {$descriptor['type']} (possible attributes are : true, false)"." ($class_filename)";
                 $is_error = true;
             }
             if($attribute == 'foreign_object' && !class_exists($value))  {
-                $result[] = "ERROR - ORM - Class $class: Non-existing entity '{$value}' given for attribute $attribute in field $field of type {$description['type']}"." ($class_filename)";
+                $result[] = "ERROR - ORM - Class $class: Non-existing entity '{$value}' given for attribute $attribute in field $field of type {$descriptor['type']}"." ($class_filename)";
                 $is_error = true;
             }
         }
@@ -227,7 +228,7 @@ foreach($classes as $class) {
                 ]
             ];
         }
-        else if(strpos($view_file, 'list.') > 0) {
+        elseif(strpos($view_file, 'list.') > 0) {
             $structure = [
                 'name',
                 'description',
@@ -238,7 +239,7 @@ foreach($classes as $class) {
                 ]
             ];
         }
-        else if(strpos($view_file, 'chart.') > 0) {
+        elseif(strpos($view_file, 'chart.') > 0) {
             $structure = [
                 'name',
                 'description',
@@ -296,7 +297,7 @@ foreach($classes as $class) {
                     if(!isset($schema[$field])) {
                         $result[] = "WARN  - I18 - Unknown field '$field' referenced in file $i18n_file";
                     }
-                    // warn about renaming root fields (specifal fiels from Model interface)
+                    // warn about renaming root fields (special fields from Model interface)
                     if(in_array($field, ['id', 'creator', 'modifier', 'modified','created', 'deleted', 'state'])) {
                         $result[] = "WARN  - I18 - Root field '$field' shouldn't be referenced in file $i18n_file";
                     }
@@ -309,21 +310,24 @@ foreach($classes as $class) {
                             $result[] = "WARN  - I18 - Missing property '$property' for field '$field' referenced in file $i18n_file";
                         }
                         else {
-                            if(mb_strlen($data['model'][$field][$property]) && !ctype_upper(substr($data['model'][$field][$property], 0, 1))) {
+                            if(mb_strlen($data['model'][$field][$property]) == 0) {
+                                $result[] = "WARN  - I18 - Value for property '$property' should not be empty for field '$field' referenced in file $i18n_file";
+                                continue;
+                            }
+                            if(!preg_match('/^\p{Lu}/u', $data['model'][$field][$property])) {
                                 $result[] = "WARN  - I18 - Value for property '$property' should start with uppercase for field '$field' referenced in file $i18n_file";
                             }
-
                             if($property == 'label') {
                                 if( mb_strlen($data['model'][$field][$property]) && substr($data['model'][$field][$property], -1) == '.' ) {
                                     $result[] = "WARN  - I18 - Value for property '$property' should not end by '.' for field '$field' referenced in file $i18n_file";
                                 }
                             }
-                            else if($property == 'help') {
+                            elseif($property == 'help') {
                                 if( mb_strlen($data['model'][$field][$property]) && !in_array(substr($data['model'][$field][$property], -1), ['.', '?', '!']) ) {
                                     $result[] = "WARN  - I18 - Value for property '$property' should end by '.' for field '$field' referenced in file $i18n_file";
                                 }
                             }
-                            else if($property == 'description') {
+                            elseif($property == 'description') {
                                 if( mb_strlen($data['model'][$field][$property]) ) {
                                     if( !in_array(substr($data['model'][$field][$property], -1), ['.', '?', '!']) ) {
                                         $result[] = "WARN  - I18 - Value for property '$property' should end by '.' for field '$field' referenced in file $i18n_file";
@@ -367,36 +371,26 @@ foreach($classes as $class) {
     // b) check that relational tables, if any, are present as well
 
 
-if(is_file('packages/'.$params['package'].'/config.inc.php')) include('packages/'.$params['package'].'/config.inc.php');
-// reminder: constants already exported : cannot redefine constants using config\export_config()
+// retrieve connection object
+$db = DBConnector::getInstance(constant('DB_HOST'), constant('DB_PORT'), constant('DB_NAME'), constant('DB_USER'), constant('DB_PASSWORD'), constant('DB_DBMS'))->connect();
 
-$db = &DBConnection::getInstance(constant('DB_HOST'), constant('DB_PORT'), constant('DB_NAME'), constant('DB_USER'), constant('DB_PASSWORD'), constant('DB_DBMS'));
-
-if(!$db->connected()) {
-    if($db->connect() == false) {
-        die('FATAL - Unable to connect to database');
-    }
+if(!$db) {
+    throw new Exception('missing_database', QN_ERROR_INVALID_CONFIG);
 }
 
 // load database tables
-$tables = array();
-$res = $db->sendQuery("show tables;");
-while($row = $db->fetchRow($res)) {
-    $tables[$row[0]] = true;
-}
+$tables_map = array_fill_keys($db->getTables(), true);
 
 $allowed_types_associations = [
-    'boolean' 		=> array('bool', 'tinyint', 'smallint', 'mediumint', 'int', 'bigint'),
+    'boolean' 		=> array('bool', 'bit', 'tinyint', 'smallint', 'mediumint', 'int', 'bigint'),
     'integer' 		=> array('tinyint', 'smallint', 'mediumint', 'int', 'bigint'),
-    'float' 		=> array('float', 'decimal'),
-    'string' 		=> array('char', 'varchar', 'tinytext', 'text', 'mediumtext', 'longtext', 'blob', 'mediumblob'),
-    'text' 			=> array('tinytext', 'text', 'mediumtext', 'longtext', 'blob'),
+    'float' 		=> array('float', 'decimal', 'real'),
+    'string' 		=> array('char', 'varchar', 'nvarchar', 'tinytext', 'text', 'mediumtext', 'longtext', 'blob', 'mediumblob'),
+    'text' 			=> array('nvarchar', 'tinytext', 'text', 'mediumtext', 'longtext', 'blob'),
     'html' 			=> array('tinytext', 'text', 'mediumtext', 'longtext', 'blob'),
     'date' 			=> array('date', 'datetime'),
     'time' 			=> array('time'),
-    'datetime' 		=> array('datetime'),
-    'timestamp' 	=> array('timestamp'),
-    'selection' 	=> array('char', 'varchar'),
+    'datetime' 		=> array('datetime', 'datetime2'),
     'file'  		=> array('blob', 'mediumblob', 'longblob'),
     'binary' 		=> array('blob', 'mediumblob', 'longblob'),
     'many2one' 		=> array('int')
@@ -407,7 +401,9 @@ foreach($classes as $class) {
     $entity = $params['package'].'\\'.$class;
 
     $model = $orm->getModel($entity);
-    if(!is_object($model)) throw new Exception("unknown class '{$entity}'", QN_ERROR_UNKNOWN_OBJECT);
+    if(!is_object($model)) {
+        throw new Exception("unknown class '{$entity}'", QN_ERROR_UNKNOWN_OBJECT);
+    }
 
     // get the complete schema of the object (including special fields)
     $schema = $model->getSchema();
@@ -417,40 +413,40 @@ foreach($classes as $class) {
     $table = $orm->getObjectTableName($entity);
 
     // 1) verify that the DB table exists
-    if(!isset($tables[$table])) {
+    if(!isset($tables_map[$table])) {
         $result[] = "ERROR - DBM - Class $class: Associated table ({$table}) does not exist in database ($class_filename)";
         $is_error = true;
         continue;
     }
 
     // load DB schema
-    $db_schema = array();
-    $res = $db->sendQuery("show full columns from `{$table}`;");
-    while($row = $db->fetchArray($res)) {
-        // we dont need the length, if present
-        $db_type = explode('(', $row['Type']);
-        $db_schema[$row['Field']] = array('type'=>$db_type[0]);
-    }
+    $db_schema = $db->getTableSchema($table);
 
-    $simple_fields = array();
-    $m2m_fields = array();
-    foreach($schema as $field => $description) {
-        if(in_array($description['type'], $orm::$simple_types)) $simple_fields[] = $field;
-        // handle the 'store' attrbute
-        else if(in_array($description['type'], array('computed', 'related'))) {
-            if(isset($description['store']) && $description['store']) $simple_fields[] = $field;
+    $simple_fields = [];
+    $m2m_fields = [];
+    foreach($schema as $field => $descriptor) {
+        if(in_array($descriptor['type'], $orm::$simple_types)) {
+            $simple_fields[] = $field;
         }
-        else if($description['type'] == 'many2many') $m2m_fields[] = $field;
+        // handle the 'store' attribute
+        elseif(in_array($descriptor['type'], array('computed', 'related'))) {
+            if(isset($descriptor['store']) && $descriptor['store']) {
+                $simple_fields[] = $field;
+            }
+        }
+        elseif($descriptor['type'] == 'many2many') {
+            $m2m_fields[] = $field;
+        }
 
-        if(isset($description['onupdate'])) {
-            $parts = explode('::', $description['onupdate']);
-            $count = count($parts);
+        if(isset($descriptor['onupdate'])) {
+            $parts = explode('::', $descriptor['onupdate']);
+            $count = count((array) $parts);
 
             $called_class = $entity;
-            $called_method = $description['onupdate'];
+            $called_method = $descriptor['onupdate'];
 
             if( $count < 1 || $count > 2 ) {
-                $result[] = "ERROR - ORM - Class $entity: Field $field has invalid onupdate property ({$description['onupdate']})";
+                $result[] = "ERROR - ORM - Class $entity: Field $field has invalid onupdate property ({$descriptor['onupdate']})";
             }
             else {
                 if( $count == 2 ) {
@@ -458,7 +454,21 @@ foreach($classes as $class) {
                     $called_method = $parts[1];
                 }
                 if(!method_exists($called_class, $called_method)) {
-                    $result[] = "ERROR - ORM - Class $entity: Field $field has onupdate property with unknown handler '{$description['onupdate']}'";
+                    $result[] = "ERROR - ORM - Class $entity: Field $field has onupdate property with unknown handler '{$descriptor['onupdate']}'";
+                }
+            }
+        }
+
+        if(isset($descriptor['description'])) {
+            if( mb_strlen($descriptor['description']) ) {
+                if(!preg_match('/^\p{Lu}/u', $descriptor['description'])) {
+                    $result[] = "WARN  - ORM - Value for attribute 'description' should start with uppercase for field '$field' referenced in file $class_filename";
+                }
+                if(!in_array(substr($descriptor['description'], -1), ['.', '?', '!'])) {
+                    $result[] = "WARN  - ORM - Value for attribute 'description' should end by '.' for field '$field' referenced in file $class_filename";
+                }
+                if( mb_strlen($descriptor['description']) > 65) {
+                    $result[] = "WARN  - ORM - Value for attribute 'description' should not exceed 65 chars for field '$field' referenced in file $class_filename";
                 }
             }
         }
@@ -485,12 +495,13 @@ foreach($classes as $class) {
         // 4) verify that the DB table exists
         $table_name = $schema[$field]['rel_table'];
 
-        if(!isset($tables[$table_name])) {
+        if(!isset($tables_map[$table_name])) {
             $result[] = "ERROR - DBM - Class $class: Relational table ($table_name) specified by field {$field} does not exist in database ($class_filename)";
             $is_error = true;
         }
     }
 }
+
 // filter result
 foreach($result as $index => $line) {
     if(strpos($line, 'ERROR') === 0 && !in_array($params['level'], ['*', 'error'])) {
@@ -502,9 +513,12 @@ foreach($result as $index => $line) {
         continue;
     }
 }
+
 $result = array_values($result);
 
-if(!count($result)) $result[] = "INFO - Nothing to report.";
+if(!count($result)) {
+    $result[] = "INFO - Nothing to report.";
+}
 
 // send json result
 $context->httpResponse()
@@ -539,7 +553,7 @@ function view_test($data, $structure) {
                     return "missing property '$key' for item $index";
                 }
             }
-            else if(isset($elem[$key]) && isset($structure[$item])){
+            elseif(isset($elem[$key]) && isset($structure[$item])){
                 $res = view_test($elem[$key], $structure[$item]);
                 if($res) {
                     return $res;

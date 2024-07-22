@@ -1,9 +1,9 @@
 <?php
 /**
 *    This file is part of the eQual framework.
-*    https://github.com/cedricfrancoys/equal
+*    https://github.com/equalframework/equal
 *
-*    Some Rights Reserved, Cedric Francoys, 2010-2021
+*    Some Rights Reserved, Cedric Francoys, 2010-2024
 *    Licensed under GNU LGPL 3 license <http://www.gnu.org/licenses/>
 *
 *    This program is free software: you can redistribute it and/or modify
@@ -19,51 +19,62 @@
 *    You should have received a copy of the GNU Lesser General Public License
 *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+use equal\error\Reporter;
 use equal\php\Context;
 use equal\route\Router;
-/**
-*
-*  This is the root entry point and acts as dispatcher.
-*  Its role is to set up the context and handle the client request.
-*  Dispatching consists of resolving targeted operation and include related script file.
-*
-*
-*  Usage examples:
-*
-*    CLI
-*            equal.run --get=test_hello
-*    HTTP
-*            /?get=resiway_tests&id=1&test=2
-*    PHP
-*            run('get', 'utils_sql-schema', ['package'=>'core']);
-*
-*/
+use equal\services\Container;
 
 /*
- Load bootstrap library: system constants and functions definitions
- (eQual library allows to include required files and classes)
+   This is the root entry point and acts as dispatcher.
+   Its role is to set up the context and handle the client request.
+   Dispatching consists of resolving targeted operation and include related script file.
+
+   Usage examples:
+
+     CLI
+             equal.run --get=test_hello
+     HTTP
+             /?get=resiway_tests&id=1&test=2
+     PHP
+             run('get', 'utils_sql-schema', ['package'=>'core']);
 */
+
+// Bootstrap the library holding system constants and functions definitions and autoload support.
 $bootstrap = dirname(__FILE__).'/eq.lib.php';
+
 if( (include($bootstrap)) === false ) {
-    die('eQual lib is missing');
+    die('Great Scott! eQual lib is missing.');
 }
+// remove PHP signature in prod
+if(constant('ENV_MODE') == 'production') {
+    header_remove('x-powered-by');
+}
+
+// get PHP context
+/** @var \equal\php\Context */
+$context = Context::getInstance();
 
 try {
     // 1) retrieve current HTTP context
 
-    // get PHP context
-    $context = Context::getInstance();
     // fetch current HTTP request from context
     $request = $context->getHttpRequest();
+    // retrieve current user
+    $auth = Container::getInstance()->get('auth');
+    // keep track of the access in the log
+    Reporter::errorHandler(EQ_REPORT_SYSTEM, "AAA::".json_encode(['type' => 'auth', 'user_id' => $auth->userId(), 'ip_address' => $request->getHeaders()->getIpAddress()]));
     // get HTTP method of current request
     $method = $request->getMethod();
     // get HttpUri object (@see equal\http\HttpUri class for URI structure)
     $uri = $request->getUri();
     // retrieve additional info from URI
     list($path, $route) = [
-        $uri->getPath(),       // current URI path
-        $uri->get('route')     // 'route' param from URI query string, if any
+        $uri->getPath(),
+        $uri->get('route')
     ];
+
+    // 2) handle routing, if required (i.e. URL to operation translation)
+
     // adjust path to route param, if set
     if($route) {
         $parts = explode(':', $route);
@@ -78,27 +89,27 @@ try {
         $request->del('route');
     }
 
-    // 2) handle routing, if required (i.e. URL to operation translation)
-
     // if routing is required
-    if( strlen($path) > 1 && !in_array(basename($path), [
-            'index.php',                // HTTP request
-            'run.php',                  // CLI
-            'equal.php'                 // integration with other frameworks that already use index.php (e.g. WP)
+    if( strlen($path) > 1
+        && !in_array(basename($path), [
+            // HTTP request
+            'index.php',
+            // CLI
+            'run.php',
+            // HTTP request with another framework relying on `index.php` (e.g. WP)
+            'equal.php'
         ]) ) {
-
         $router = Router::getInstance();
         // add routes providers according to current request
         $router->add(QN_BASEDIR.'/config/routing/*.json');
-        $router->add(QN_BASEDIR.'/config/routing/i18n/*.json');
         // translate preflight requests (OPTIONS) to be handled as GET, with announcement
-        // (so API does not have to explicitely define OPTIONS routes)
+        // (so API does not have to explicitly define OPTIONS routes)
         if($method == 'OPTIONS') {
             $params['announce'] = true;
             $methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'TRACE'];
-            foreach($methods as $test_method) {
-                if($router->resolve($path, $test_method)) {
-                    $method = $test_method;
+            foreach($methods as $method_candidate) {
+                if($router->resolve($path, $method_candidate)) {
+                    $method = $method_candidate;
                     break;
                 }
             }
@@ -118,8 +129,9 @@ try {
             // remove remaining params and trailing slash, if any
             $route['redirect'] = rtrim(preg_replace('/\/:.+\/?/', '', $route['redirect']), '/');
             // manually set the response header to HTTP 200
-            header($_SERVER['SERVER_PROTOCOL'].' 200 OK'); // for HTTP client
-            header('Status: 200 OK'); // and CLI
+            header($_SERVER['SERVER_PROTOCOL'].' 200 OK');
+            // add explicit status for non-HTTP context (CLI)
+            header('Status: 200 OK');
             // redirect to resulting URL
             header('Location: '.$route['redirect']);
             // good job, let's rest now
@@ -139,7 +151,7 @@ try {
         $route = [
             'operation' => Router::normalizeOperation('?'.$uri->query())
         ];
-        // if no route is specified in the URI, check for DEFAULT_PACKAGE constant (which might be defined in root config.inc.php)
+        // if no route is specified in the URI, check for DEFAULT_PACKAGE constant (which might be defined in root `config.json`)
         if(!isset($route['operation']['name'])) {
             if(defined('DEFAULT_PACKAGE')) {
                 $route['operation']['name'] = constant('DEFAULT_PACKAGE');
@@ -148,8 +160,27 @@ try {
         }
     }
 
-    // 3) perform requested operation and output result to STDOUT
+    // 3) perform requested operation
+
+    // store http info to access log
+    Reporter::errorHandler(EQ_REPORT_INFO, "NET::".json_encode([
+                'method'    => $method,
+                'uri'       => (string) $uri,
+                'headers'   => $request->getHeaders(true),
+                'body'      => $request->getBody()
+            ], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES)
+        );
+
+    // output result to STDOUT
     echo run($route['operation']['type'], $route['operation']['name'], (array) $request->body(), true);
+
+    // store NET info to access log
+    Reporter::errorHandler(EQ_REPORT_SYSTEM, "NET::".json_encode([
+                'start'     => $_SERVER["REQUEST_TIME_FLOAT"],
+                'end'       => microtime(true),
+                'ip'        => $request->getHeaders()->getIpAddress()
+            ])
+        );
 }
 // something went wrong: send a HTTP response according to the raised exception
 catch(Throwable $e) {
@@ -161,9 +192,11 @@ catch(Throwable $e) {
     }
     // an exception with code 0 is an explicit request to halt process with no error
     if($error_code != 0) {
+        Reporter::handleThrowable($e);
         // retrieve info from HTTP request (we don't ask for $context->httpResponse() since it might have raised the current exception)
-        $request_method = $context->httpRequestMethod();
-        $request_headers = $context->httpRequestHeaders();
+        $request = $context->getHttpRequest();
+        $request_method = $request->getMethod();
+        $request_headers = $request->getHeaders(true);
         // get HTTP status code according to raised exception
         $http_status = qn_error_http($error_code);
         $http_allow_headers = '*';
@@ -174,7 +207,7 @@ catch(Throwable $e) {
         // redirect to custom location defined for this code, if any
         if(defined('HTTP_REDIRECT_'.$http_status)) {
             header('Location: '.constant('HTTP_REDIRECT_'.$http_status));
-            exit();
+            exit(0);
         }
         $msg = $e->getMessage();
         // handle serialized objects as message
@@ -183,23 +216,35 @@ catch(Throwable $e) {
         $response = $context->httpResponse();
         // adapt response and send it
         $response
-        // set HTTP status code
-        ->status($http_status)
-        // explicitly tell we're returning JSON
-        ->header('Content-Type', 'application/json')
-        ->header('Content-Disposition', 'inline')
-        // force allow-origin to actual origin, to make sure to go through CORS policy
-        // (response is defined in announce() and has been unstacked because of an exception)
-        ->header('Access-Control-Allow-Origin', $request_headers['Origin'])
-        ->header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD,TRACE')
-        ->header('Access-Control-Allow-Headers', $http_allow_headers)
-        ->header('Access-Control-Allow-Credentials', 'true')
-        // append an 'error' section to response body
-        ->extendBody([ 'errors' => [ qn_error_name($error_code) => ($data)?$data:utf8_encode($msg) ] ])
-        // for debug purpose
-        // ->extendBody([ 'logs' => file_get_contents(QN_LOG_STORAGE_DIR.'/error.log').file_get_contents(QN_LOG_STORAGE_DIR.'/eq_error.log')])
-        ->send();
-        trigger_error("{$request_headers['Origin']} PHP::".qn_error_name($error_code)." - ".$msg, QN_REPORT_WARNING);
+            // set HTTP status code
+            ->status($http_status)
+            // explicitly tell we're returning JSON
+            ->header('Content-Type', 'application/json')
+            ->header('Content-Disposition', 'inline')
+            // force allow-origin to actual origin, to make sure to go through CORS policy
+            // (response is defined in announce() and has been unstacked because of an exception)
+            ->header('Access-Control-Allow-Origin', $request_headers['Origin'])
+            ->header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD,TRACE')
+            ->header('Access-Control-Allow-Headers', $http_allow_headers)
+            ->header('Access-Control-Allow-Credentials', 'true')
+            // append an 'error' section to response body
+            ->extendBody([
+                    // #memo - mb_convert_encoding returns an empty string in PHP 8.1.0 (fixed in 8.1.2)
+                    'errors' => [ qn_error_name($error_code) => ($data)?$data:mb_convert_encoding($msg, 'UTF-8', mb_list_encodings()) ]
+                ])
+            ->send();
+        trigger_error("PHP::{$request_method} {$request->getUri()} => $http_status ".qn_error_name($error_code).": ".$msg, ($http_status < 500)?EQ_REPORT_WARNING:EQ_REPORT_ERROR);
+    }
+    // store NET info to access log
+    Reporter::errorHandler(EQ_REPORT_SYSTEM, "NET::".json_encode([
+                'start'     => $_SERVER["REQUEST_TIME_FLOAT"],
+                'end'       => microtime(true),
+                'ip'        => $request->getHeaders()->getIpAddress()
+            ])
+        );
+    // an exception with code 0 is an explicit request to halt process with no error
+    if($error_code != 0) {
+       // return an error code (for compliance under CLI environment)
         exit(1);
     }
 }

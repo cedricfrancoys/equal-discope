@@ -20,7 +20,25 @@ class Scheduler extends Service {
     }
 
     public static function constants() {
-        return [];
+        return ['MEM_FREE_LIMIT'];
+    }
+
+    private static function computeAvailableMemory() {
+        $memory = 0;
+        if(strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            if($output = shell_exec('wmic OS get FreePhysicalMemory /Value')) {
+                preg_match('/FreePhysicalMemory=(\d+)/', $output, $matches);
+                $memory = isset($matches[1]) ? intval($matches[1]) : 0;
+            }
+        }
+        else {
+            $meminfo = @file_get_contents('/proc/meminfo');
+            if($meminfo !== false) {
+                preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $matches);
+                $memory = isset($matches[1]) ? intval($matches[1]) : 0;
+            }
+        }
+        return $memory * 1000;
     }
 
     /**
@@ -45,22 +63,36 @@ class Scheduler extends Service {
             $selected_tasks_ids = $orm->search('core\Task', [
                     // #memo - we need to select all active tasks (recurring or not)
                     ['is_active', '=', true],
+                    ['status', '=', 'idle'],
                     ['moment', '<=', $now]
                 ], ['moment' => 'asc'], 0, 10);
         }
 
         if($selected_tasks_ids > 0 && count($selected_tasks_ids)) {
+
+            // do not run the task if current available memory is below MEM_FREE_LIMIT
+            $mem_available = self::computeAvailableMemory();
+            if($mem_available < constant('MEM_FREE_LIMIT')) {
+                trigger_error("PHP::Ignoring scheduler batch because free memory is below MEM_FREE_LIMIT (".$mem_available."/".constant('MEM_FREE_LIMIT').")", QN_REPORT_INFO);
+                return;
+            }
+
             // if an exclusive task is already running, ignore current batch
             $running_tasks_ids = $orm->search('core\Task', [['status', '=', 'running'], ['is_exclusive', '=', true]]);
             if($running_tasks_ids > 0 && count($running_tasks_ids)) {
                 trigger_error("PHP::Ignoring scheduler batch because at least one exclusive task is already running (running tasks ".implode(',', $running_tasks_ids).")", QN_REPORT_INFO);
                 return;
             }
-            $tasks = $orm->read('core\Task', $selected_tasks_ids, ['id', 'moment', 'status', 'is_exclusive', 'is_recurring', 'repeat_axis', 'repeat_step', 'after_execution', 'controller', 'params']);
-            foreach($tasks as $tid => $task) {
+            foreach($selected_tasks_ids as $tid) {
+                // #memo - reading is done just before processing, to make sure to get up-to-date values (tasks might have been updated by another process)
+                $tasks = $orm->read('core\Task', $tid, ['id', 'moment', 'status', 'is_exclusive', 'is_recurring', 'repeat_axis', 'repeat_step', 'after_execution', 'controller', 'params']);
+                if($tasks < 0 || !count($tasks)) {
+                    continue;
+                }
+                $task = reset($tasks);
                 // prevent simultaneous execution of a same task
                 if($task['status'] != 'idle') {
-                    trigger_error("PHP::Ignoring execution of task that is already running [{$task['id']}] - [{$task['controller']}]", QN_REPORT_INFO);
+                    trigger_error("PHP::Ignoring execution of a task that is already running [{$task['id']}] - [{$task['controller']}]", QN_REPORT_INFO);
                     continue;
                 }
                 // prevent concurrent execution for exclusive tasks
@@ -71,10 +103,10 @@ class Scheduler extends Service {
                         continue;
                     }
                 }
-                // mark the task as running and update last_run
-                $orm->update('core\Task', $tid, ['status' => 'running', 'last_run' => $now, 'pid' => getmypid()]);
                 // if due time has passed or if specific tasks_ids are given, execute the task
                 if($task['moment'] <= $now || count($tasks_ids) > 0) {
+                    // mark the task as running and update last_run
+                    $orm->update('core\Task', $tid, ['status' => 'running', 'last_run' => $now, 'pid' => getmypid()]);
                     // if no specific tasks_ids are given, update each task
                     if(!count($tasks_ids)) {
                         // #memo - we must start by updating the task : some controllers might run for a duration longer than the remaining time before the next `run()` call
@@ -104,7 +136,7 @@ class Scheduler extends Service {
                         // run the task
                         $data = \eQual::run('do', $task['controller'], $body, true);
                         $status = 'success';
-	                    $log = json_encode($data, JSON_PRETTY_PRINT);
+	                    $log = (string) json_encode($data, JSON_PRETTY_PRINT);
                     }
                     catch(\Exception $e) {
                         // error occurred during execution
@@ -138,7 +170,7 @@ class Scheduler extends Service {
      */
     public function schedule($name, $moment, $controller, $params, $recurring=false, $repeat_axis='day', $repeat_step='1') {
         $orm = $this->container->get('orm');
-        // trigger_error("PHP::Scheduling job", QN_REPORT_INFO);
+        trigger_error("PHP::Scheduling job", QN_REPORT_INFO);
 
         return $orm->create('core\Task', [
             'name'          => $name,

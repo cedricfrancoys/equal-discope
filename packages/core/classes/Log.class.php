@@ -1,7 +1,7 @@
 <?php
 /*
-    This file is part of the eQual framework <http://www.github.com/cedricfrancoys/equal>
-    Some Rights Reserved, Cedric Francoys, 2010-2021
+    This file is part of the eQual framework <http://www.github.com/equalframework/equal>
+    Some Rights Reserved, Cedric Francoys, 2010-2024
     Licensed under GNU GPL 3 license <http://www.gnu.org/licenses/>
 */
 namespace core;
@@ -35,15 +35,21 @@ class Log extends Model {
                 'description'       => "Identifier of the targeted object (of given class)."
             ],
 
-            /*
-                Additional (optional) value.
-                Can be used for custom actions (e.g. 'status_update') and hold a newly assigned value.
-            */
             'value' => [
                 'type'              => 'string',
-                'description'       => "Optional value depending on the type of action."
+                'usage'             => 'text/json',
+                'description'       => "Changes (new values) made to the object, if any.",
+                'help'              => "JSON representation of the new values(diff) of the object (if changes were made)."
             ]
 
+        ];
+    }
+
+    public function getUnique() {
+        return [
+            ['user_id'],
+            ['object_class'],
+            ['object_id']
         ];
     }
 }

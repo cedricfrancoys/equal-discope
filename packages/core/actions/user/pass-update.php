@@ -6,7 +6,7 @@
 */
 use core\User;
 
-list($params, $providers) = announce([
+list($params, $providers) = eQual::announce([
     'description'   => 'Updates the password related to a user account.',
     'response'      => [
         'content-type'  => 'application/json',
@@ -37,7 +37,7 @@ list($params, $providers) = announce([
             'required'      => true
         ]
     ],
-    'constants'     => ['AUTH_ACCESS_TOKEN_VALIDITY', 'AUTH_REFRESH_TOKEN_VALIDITY', 'AUTH_TOKEN_HTTPS'],
+    'constants'     => ['AUTH_ACCESS_TOKEN_VALIDITY', 'AUTH_TOKEN_HTTPS'],
     'providers'     => ['context', 'orm', 'auth']
 ]);
 
@@ -70,7 +70,7 @@ $instance = User::id($target_user_id)
     ->update([
         'password' => $params['password']
     ])
-    ->adapt('txt')
+    ->adapt('json')
     ->first(true);
 
 $response = $context->httpResponse();
@@ -79,14 +79,8 @@ $response = $context->httpResponse();
 if(strlen($params['token'])) {
     // generate a JWT access token
     $access_token  = $auth->token($user_id, constant('AUTH_ACCESS_TOKEN_VALIDITY'));
-    $refresh_token = $auth->token($user_id, constant('AUTH_REFRESH_TOKEN_VALIDITY'));
     $response->cookie('access_token',  $access_token, [
         'expires'   => time() + constant('AUTH_ACCESS_TOKEN_VALIDITY'),
-        'httponly'  => true,
-        'secure'    => constant('AUTH_TOKEN_HTTPS')
-    ])
-    ->cookie('refresh_token', $refresh_token, [
-        'expires'   => time() + constant('AUTH_REFRESH_TOKEN_VALIDITY'),
         'httponly'  => true,
         'secure'    => constant('AUTH_TOKEN_HTTPS')
     ]);

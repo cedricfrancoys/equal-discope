@@ -25,7 +25,7 @@ class SettingValue extends Model {
                 'type'              => 'computed',
                 'result_type'       => 'string',
                 'description'       => "Code to serve as reference (might not be unique).",
-                'function'          => 'core\setting\SettingValue::calcName',
+                'function'          => 'calcName',
                 'store'             => true,
                 'readonly'          => true
             ],
@@ -34,6 +34,7 @@ class SettingValue extends Model {
                 'type'              => 'many2one',
                 'foreign_object'    => 'core\setting\Setting',
                 'description'       => 'Setting the value relates to.',
+                'ondelete'          => 'cascade',
                 'required'          => true
             ],
 
@@ -41,28 +42,26 @@ class SettingValue extends Model {
                 'type'              => 'many2one',
                 'foreign_object'    => 'core\User',
                 'description'       => 'User the setting is specific to (optional).',
-                'default'           => 0
+                'default'           => 0,
+                'ondelete'          => 'cascade'
             ],
 
-            // #memo - for settings not having the is_multilang field set, translations are ignored
             'value' => [
                 'type'              => 'string',
                 'description'       => 'JSON value of the parameter.',
+                'help'              => 'For settings not having the is_multilang field set, translations are ignored.',
                 'multilang'         => true
             ]
 
         ];
     }
 
-    public static function calcName($om, $oids, $lang) {
+    public static function calcName($self) {
         $result = [];
-
-        $settingValues = $om->read(__CLASS__, $oids, ['setting_id.name'], $lang);
-
-        foreach($settingValues as $oid => $odata) {
-            $result[$oid] = $odata['setting_id.name'];
+        $self->read(['setting_id' => ['name']]);
+        foreach($self as $id => $value) {
+            $result[$id] = $value['setting_id']['name'];
         }
-
         return $result;
     }
 

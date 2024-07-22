@@ -8,13 +8,16 @@ namespace core;
 
 use equal\orm\Model;
 
+/**
+ * @deprecated
+ */
 class Version extends Model {
 
     public static function getColumns() {
         return [
             /* override state field */
             'state' => [
-                'type'              => 'string', 
+                'type'              => 'string',
                 'selection'         => ['draft', 'version']
             ],
 
