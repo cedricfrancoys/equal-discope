@@ -34,7 +34,7 @@ jobs:
       - run: git clone https://github.com/yesbabylon/discope.git packages
       - run: cp -r packages.core/core packages/
       - run: git -C packages clone https://github.com/cedricfrancoys/lodging-tmp.git lodging
-      - run: php run.php --do=init_package --package=lodging --import=true --import_cascade=false
+      - run: php run.php --do=init_package --package=lodging --import=true --test=true --import_cascade=false
       - run: php run.php --do=test_package --package=lodging
       # export logs on failure
       - run:
