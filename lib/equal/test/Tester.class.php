@@ -162,9 +162,9 @@ class Tester {
 
             $result_txt = $result;
             if(gettype($result) == 'object') {
-                $result_txt = get_class($result);
+                $result_txt = get_class($result).' object';
                 if(is_a($result, Model::getType())) {
-                    $result_txt .= ' object:'.json_encode($result->toArray());
+                    $result_txt .= ':'.json_encode($result->toArray());
                 }
             }
             $this->results[$id]['result'] = $result_txt;
