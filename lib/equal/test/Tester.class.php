@@ -158,7 +158,7 @@ class Tester {
 
             $this->results[$id]['status'] = $success?'ok':'ko';
             if(gettype($result) == 'object') {
-                $result = get_class($result).' object:'.json_encode($result);
+                $result = get_class($result).' object:'.json_encode($result->toArray());
             }
             $this->results[$id]['result'] = $result;
 
