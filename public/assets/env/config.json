@@ -1,8 +1,8 @@
 {
     "production":       true,
-    "parent_domain":    "discope.yb.run",
-    "backend_url":      "https://discope.yb.run",
-    "rest_api_url":     "https://discope.yb.run/",
+    "parent_domain":    "equaldiscope.local",
+    "backend_url":      "http://equaldiscope.local",
+    "rest_api_url":     "http://equaldiscope.local",
     "user_entity":      "lodging\\identity\\User",
     "lang":             "fr",
     "locale":           "fr",
