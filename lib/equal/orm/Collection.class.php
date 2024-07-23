@@ -875,18 +875,6 @@ class Collection implements \Iterator, \Countable {
             // retrieve targeted fields names
             $fields = array_keys($values);
 
-            // 2) check that current user has enough privilege to perform WRITE operation
-            if(!$this->ac->isAllowed(EQ_R_WRITE, $this->class, $fields, $ids)) {
-                throw new \Exception($user_id.';UPDATE;'.$this->class.';['.implode(',', $fields).'];['.implode(',', $ids).']', EQ_ERROR_NOT_ALLOWED);
-            }
-
-            // if object is not yet an instance, check required fields (otherwise, we allow partial update)
-            $check_required = (isset($values['state']) && $values['state'] == 'draft')?true:false;
-
-            // 3) validate : check unique keys and required fields
-            $this->validate($values, $ids, true, $check_required);
-
-            // 4) update objects
             // by convention, update operation sets modifier as current user
             $values['modifier'] = $user_id;
             // unless explicitly assigned (to another value than 'draft'), update operation always sets state to 'instance'
@@ -894,11 +882,23 @@ class Collection implements \Iterator, \Countable {
                 $values['state'] = 'instance';
             }
 
-            $canupdate = $this->call('canupdate', $values);
+            // 2) check that current user has enough privilege to perform WRITE operation
+            if(!$this->ac->isAllowed(EQ_R_WRITE, $this->class, $fields, $ids)) {
+                throw new \Exception($user_id.';UPDATE;'.$this->class.';['.implode(',', $fields).'];['.implode(',', $ids).']', EQ_ERROR_NOT_ALLOWED);
+            }
+
+            // 3) validate : check unique keys and required fields
+            // if object is not yet an instance, check required fields (otherwise, partial update is allowed)
+            $check_required = (isset($values['state']) && $values['state'] == 'draft')?true:false;
+            $this->validate($values, $ids, true, $check_required);
+
+            // check if fields (other than special columns) can be updated
+            $canupdate = $this->call('canupdate', array_diff_key($values, Model::getSpecialColumns()));
             if(!empty($canupdate)) {
                 throw new \Exception(serialize($canupdate), QN_ERROR_NOT_ALLOWED);
             }
 
+            // 4) update objects
             $res = $this->orm->update($this->class, $ids, $values, ($lang)?$lang:$this->lang);
             if($res <= 0) {
                 trigger_error("ORM::unexpected error when updating {$this->class} objects:".$this->orm->getLastError(), EQ_REPORT_INFO);
