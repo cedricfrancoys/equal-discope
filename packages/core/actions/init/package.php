@@ -61,7 +61,7 @@ list($params, $providers) = eQual::announce([
             'default'       => true
         ]
     ],
-    'constants'     => ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_DBMS'],
+    'constants'     => ['DEFAULT_LANG', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_DBMS'],
     'providers'     => ['context', 'orm', 'adapt', 'report'],
 ]);
 
@@ -178,7 +178,7 @@ if(!$skip_package) {
                 if(!$entity) {
                     continue;
                 }
-                $lang = $class['lang'] ?? 'en';
+                $lang = $class['lang'] ?? constant('DEFAULT_LANG');
                 $model = $orm->getModel($entity);
                 $schema = $model->getSchema();
 
@@ -239,7 +239,7 @@ if(!$skip_package) {
                 if(!$entity) {
                     continue;
                 }
-                $lang = $class['lang'] ?? 'en';
+                $lang = $class['lang'] ?? constant('DEFAULT_LANG');
                 $model = $orm->getModel($entity);
                 $schema = $model->getSchema();
 
@@ -296,7 +296,7 @@ if(!$skip_package) {
                 if(!$entity) {
                     continue;
                 }
-                $lang = $class['lang'] ?? 'en';
+                $lang = $class['lang'] ?? constant('DEFAULT_LANG');
                 $model = $orm->getModel($entity);
                 $schema = $model->getSchema();
 
