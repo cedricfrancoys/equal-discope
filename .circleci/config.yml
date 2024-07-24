@@ -38,6 +38,7 @@ jobs:
       - run: git -C packages clone https://github.com/cedricfrancoys/lodging-tmp.git lodging
       - run: php run.php --do=init_package --package=lodging --import=true --test=true --import_cascade=false
       - run: php run.php --do=test_package --package=lodging
+      # temp
       # export logs on failure
       - run:
           when: on_fail
